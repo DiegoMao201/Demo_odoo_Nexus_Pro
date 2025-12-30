@@ -37,8 +37,7 @@ if custom_model:
 # --- FUNCIÓN DE INSPECCIÓN ---
 def inspect_model(model):
     try:
-        # 1. Obtener Metadatos (Diccionario de campos)
-        # fields_get es el método de Odoo que nos dice la estructura de la tabla
+        # 1. Obtener Metadatos
         fields_info = odoo.models.execute_kw(
             odoo.db, odoo.uid, odoo.password,
             model, 'fields_get', 
@@ -47,15 +46,23 @@ def inspect_model(model):
         df_structure = pd.DataFrame.from_dict(fields_info, orient='index')
         df_structure = df_structure.reset_index().rename(columns={'index': 'Field Name'})
         
-        # 2. Obtener Datos de Muestra (Primeros 5 registros)
-        # Traemos todos los campos para ver qué hay
+        # 2. Obtener Datos de Muestra
         sample_data = odoo.models.execute_kw(
             odoo.db, odoo.uid, odoo.password,
             model, 'search_read', 
-            [[]], {'limit': 5} # Sin filtros, solo 5 registros
+            [[]], {'limit': 5}
         )
         df_sample = pd.DataFrame(sample_data)
         
+        # --- CORRECCIÓN DEL ERROR PYARROW ---
+        # Convertimos todo a string para evitar conflictos entre Listas y Booleanos
+        if not df_sample.empty:
+            for col in df_sample.columns:
+                # Si la columna es de tipo objeto (listas, mix de tipos), la forzamos a texto
+                if df_sample[col].dtype == 'object':
+                    df_sample[col] = df_sample[col].astype(str)
+        # ------------------------------------
+
         return df_structure, df_sample
     except Exception as e:
         return None, str(e)
