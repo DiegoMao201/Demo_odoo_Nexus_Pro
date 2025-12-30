@@ -9,17 +9,21 @@ import urllib.parse
 import base64
 from fpdf import FPDF
 
-# --- CONFIGURACIÓN DE PÁGINA ---
+# --- CONFIGURACIÓN DE PÁGINA (AQUÍ SE DEFINE EL NOMBRE DE LA PESTAÑA) ---
 st.set_page_config(
-    page_title="Nexus Pro AI | Executive Suite", 
+    page_title="NEXUS PRO IA", 
     layout="wide", 
     page_icon="💎",
     initial_sidebar_state="expanded"
 )
 
-# --- ESTILOS CSS PRO ---
+# --- ESTILOS CSS PRO (LIMPIEZA VISUAL) ---
 st.markdown("""
 <style>
+    /* Ocultar menú hamburguesa y footer de Streamlit por defecto si se desea limpieza total */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    
     .metric-card {
         background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
         border-radius: 15px; 
@@ -29,11 +33,6 @@ st.markdown("""
         border-left: 5px solid #2E86C1;
         margin-bottom: 10px;
     }
-    .big-font { font-size: 20px !important; font-weight: bold; color: #2C3E50; }
-    .header-style { font-size: 30px; font-weight: 800; color: #1B4F72; }
-    .sub-text { font-size: 14px; color: #566573; }
-    
-    /* Pestañas personalizadas */
     .stTabs [data-baseweb="tab-list"] { gap: 10px; }
     .stTabs [data-baseweb="tab"] {
         height: 60px;
@@ -224,7 +223,7 @@ class PDFReport(FPDF):
     def header(self):
         self.set_font('Arial', 'B', 15)
         self.set_text_color(44, 62, 80)
-        self.cell(0, 10, 'NEXUS PRO - INFORME GERENCIAL', 0, 1, 'C')
+        self.cell(0, 10, 'NEXUS PRO IA - INFORME GERENCIAL', 0, 1, 'C')
         self.set_font('Arial', 'I', 10)
         self.cell(0, 10, f'Generado: {datetime.now().strftime("%d/%m/%Y %H:%M")}', 0, 1, 'C')
         self.ln(10)
@@ -234,7 +233,7 @@ class PDFReport(FPDF):
         self.set_y(-15)
         self.set_font('Arial', 'I', 8)
         self.set_text_color(128)
-        self.cell(0, 10, f'Nexus AI System - Pagina {self.page_no()}', 0, 0, 'C')
+        self.cell(0, 10, f'NEXUS PRO IA System - Pagina {self.page_no()}', 0, 0, 'C')
 
 def create_pdf(df):
     pdf = PDFReport()
@@ -285,11 +284,14 @@ def create_pdf(df):
 # --- 4. INTERFAZ PRINCIPAL (SIDEBAR) ---
 
 with st.sidebar:
+    # Si quieres quitar el logo de diamante y poner uno tuyo, cambia la URL aquí
     st.image("https://cdn-icons-png.flaticon.com/512/882/882706.png", width=60)
-    st.markdown("## 💎 Nexus PRO AI")
+    
+    # --- AQUÍ ESTÁ EL CAMBIO DE NOMBRE ---
+    st.markdown("## 💎 NEXUS PRO IA")
     st.markdown("---")
     
-    st.subheader("⚙️ Configuración de Análisis")
+    st.subheader("⚙️ Configuración")
     
     dias_analisis = st.slider("Ventana de Tiempo (Días)", 30, 365, 90)
     st.info(f"Analizando rotación basada en los últimos {dias_analisis} días.")
@@ -311,7 +313,8 @@ with st.spinner('🔄 Sincronizando con ERP y procesando algoritmos...'):
     df = process_business_logic(raw_data, dias_analisis)
 
 # KPIs Principales (Header)
-st.title("Tablero de Mando Integral")
+# --- AQUÍ TAMBIÉN ESTÁ EL CAMBIO DE NOMBRE ---
+st.title("💎 NEXUS PRO IA | Dashboard Gerencial")
 
 col1, col2, col3, col4 = st.columns(4)
 
@@ -479,11 +482,11 @@ with tab5:
     # WHATSAPP
     with col_r3:
         st.subheader("📲 Alerta Gerencial")
-        msg = f"*REPORTE NEXUS {datetime.now().date()}*\n\n"
+        msg = f"*REPORTE NEXUS PRO IA {datetime.now().date()}*\n\n"
         msg += f"✅ Ventas: ${df['Ventas_Totales'].sum():,.0f}\n"
         msg += f"🚨 Quiebres Críticos: {len(df[df['Diagnostico_IA'].str.contains('URGENTE')])}\n"
         msg += f"🐢 Dinero Atrapado: ${dinero_hueso:,.0f}\n"
-        msg += "\n_Generado por Nexus AI_"
+        msg += "\n_Generado por NEXUS PRO IA_"
         
         encoded_msg = urllib.parse.quote(msg)
         st.markdown(f"""
@@ -492,4 +495,4 @@ with tab5:
         </a>
         """, unsafe_allow_html=True)
 
-st.caption("Nexus PRO AI System v3.0 | Powered by Nexus")
+st.caption("NEXUS PRO IA System v3.0 | Powered by Python & Streamlit")
