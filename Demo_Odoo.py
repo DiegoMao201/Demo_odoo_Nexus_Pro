@@ -8,16 +8,8 @@ from datetime import datetime, timedelta
 import urllib.parse
 import base64
 from fpdf import FPDF
-import tempfile
 
-# Intentar importar el conector, si no existe, usamos modo DEMO
-try:
-    from odoo_client import OdooConnector
-    CONNECTION_ACTIVE = True
-except ImportError:
-    CONNECTION_ACTIVE = False
-
-# --- CONFIGURACIÓN PRO ---
+# --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(
     page_title="Nexus Logistics AI | Executive Suite", 
     layout="wide", 
@@ -25,7 +17,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Estilos CSS de Alta Gama (Dark/Light mode compatible)
+# --- ESTILOS CSS PRO ---
 st.markdown("""
 <style>
     .metric-card {
@@ -35,11 +27,11 @@ st.markdown("""
         box-shadow: 0 4px 6px rgba(0,0,0,0.1);
         text-align: center;
         border-left: 5px solid #2E86C1;
+        margin-bottom: 10px;
     }
     .big-font { font-size: 20px !important; font-weight: bold; color: #2C3E50; }
     .header-style { font-size: 30px; font-weight: 800; color: #1B4F72; }
     .sub-text { font-size: 14px; color: #566573; }
-    div[data-testid="stMetricValue"] { font-size: 28px; color: #1B4F72; }
     
     /* Pestañas personalizadas */
     .stTabs [data-baseweb="tab-list"] { gap: 10px; }
@@ -49,6 +41,7 @@ st.markdown("""
         background-color: #F8F9F9;
         border-radius: 10px 10px 0 0;
         font-weight: 600;
+        border: 1px solid #ddd;
     }
     .stTabs [aria-selected="true"] {
         background-color: #2E86C1;
@@ -57,455 +50,446 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- 1. GENERADOR DE DATOS DEMO (Para que el script funcione YA) ---
+# --- 1. MÓDULO DE CONEXIÓN Y DATOS ---
+
+# Intentamos importar el cliente Odoo. Si falla, activamos modo DEMO.
+try:
+    from odoo_client import OdooConnector
+    CONNECTION_ACTIVE = True
+except ImportError:
+    CONNECTION_ACTIVE = False
+
 def generate_mock_data():
-    """Genera datos realistas para demostración si Odoo falla o no está conectado."""
-    categories = ['Electrónica Premium', 'Accesorios', 'Hogar Inteligente', 'Gadgets Obsoletos']
+    """Genera datos simulados matemáticamente realistas para demostración."""
+    np.random.seed(42)
+    categories = ['Alta Tecnología', 'Accesorios', 'Hogar Smart', 'Legacy/Obsoletos']
     products = []
     
-    # Generar 100 productos
-    for i in range(100):
+    for i in range(150):
         cat = np.random.choice(categories)
-        base_price = np.random.randint(50, 2000)
-        cost = base_price * 0.6 # Margen del 40%
+        base_price = np.random.randint(20, 1500)
+        cost = base_price * 0.55 # Margen aprox 45%
         
-        # Lógica de simulación: Algunos venden mucho, otros nada
-        if cat == 'Electrónica Premium':
-            qty = np.random.randint(0, 50) # Poco stock
-            sold = np.random.randint(50, 200) # Mucha venta
-        elif cat == 'Gadgets Obsoletos':
-            qty = np.random.randint(100, 500) # Mucho stock
-            sold = np.random.randint(0, 10) # Poca venta
+        # Simulación de escenarios de negocio
+        if cat == 'Alta Tecnología':
+            qty = np.random.randint(0, 40) # Stock bajo
+            sold = np.random.randint(40, 300) # Venta alta
+        elif cat == 'Legacy/Obsoletos':
+            qty = np.random.randint(100, 600) # Stock altísimo
+            sold = np.random.randint(0, 5) # Venta nula
         else:
             qty = np.random.randint(10, 100)
-            sold = np.random.randint(10, 100)
+            sold = np.random.randint(10, 150)
             
         products.append({
             'product_name': f"SKU-{i:03d} | {cat} - Item {i}",
             'category': cat,
-            'quantity': qty, # Stock actual
-            'value': qty * cost, # Valor inventario (Costo)
-            'cost_unit': cost,
-            'price_unit': base_price,
-            'qty_sold': sold, # Ventas periodo
-            'revenue': sold * base_price, # Ingresos
-            'margin': (sold * base_price) - (sold * cost) # Margen Bruto
+            'quantity': qty,
+            'value': qty * cost,
+            'qty_sold': sold,
+            'revenue': sold * base_price,
+            'cost_unit': cost
         })
     
     return pd.DataFrame(products)
 
-# --- 2. CARGA Y PROCESAMIENTO ---
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=600)
 def get_master_data():
+    """
+    Función MAESTRA de obtención de datos.
+    Integra Odoo y maneja la fusión (Merge) aquí para evitar errores en la UI.
+    """
     if CONNECTION_ACTIVE:
         try:
             connector = OdooConnector()
+            # 1. Traer datos crudos
             df_stock = connector.get_stock_data()
             df_sales = connector.get_sales_data()
-            # Fusión básica (asumiendo que viene de Odoo real)
-            # Aquí deberías adaptar según tu estructura real de Odoo
-            # Para este ejemplo, si falla la conexión real, saltamos al except
-            return df_stock, df_sales 
-        except:
-            return generate_mock_data(), None
+
+            # Verificación de datos vacíos
+            if df_stock.empty and df_sales.empty:
+                return generate_mock_data(), False
+
+            # 2. Agrupación segura (evitar duplicados de líneas)
+            stock_gb = df_stock.groupby('product_name').agg({
+                'quantity': 'sum', 
+                'value': 'sum'
+            }).reset_index()
+
+            sales_gb = df_sales.groupby('product_name').agg({
+                'qty_sold': 'sum', 
+                'revenue': 'sum'
+            }).reset_index()
+
+            # 3. MERGE (Fusión) OUTER JOIN
+            # Esto asegura que tengamos productos con stock pero sin ventas y viceversa
+            df_final = pd.merge(stock_gb, sales_gb, on='product_name', how='outer').fillna(0)
+            
+            # 4. Enriquecimiento de datos (Categoría dummy si no viene de Odoo)
+            df_final['category'] = 'General'
+            # Costo unitario estimado para cálculos
+            df_final['cost_unit'] = np.where(df_final['quantity'] > 0, 
+                                            df_final['value'] / df_final['quantity'], 
+                                            0)
+            
+            return df_final, True
+
+        except Exception as e:
+            print(f"Error de conexión Odoo: {e}")
+            return generate_mock_data(), False # Fallback a Demo
     else:
-        return generate_mock_data(), None
+        return generate_mock_data(), False
 
-# Sidebar: Control de Mando
-with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/882/882706.png", width=60)
-    st.markdown("## 💎 Nexus Logistics AI")
-    st.markdown("<div class='sub-text'>Suite de Inteligencia Comercial</div>", unsafe_allow_html=True)
-    st.divider()
-    
-    # Filtros
-    st.subheader("⚙️ Parámetros de Análisis")
-    dias_analisis = st.slider("Ventana de Análisis (Días)", 30, 365, 90)
-    
-    st.divider()
-    st.info(f"📅 Analizando últimos {dias_analisis} días de operación.")
-    
-    admin_phone = st.text_input("📱 WhatsApp Gerencial", "573001234567")
-    
-    if not CONNECTION_ACTIVE:
-        st.warning("⚠️ Modo DEMO Activo (Datos Simulados)")
+# --- 2. MOTOR DE INTELIGENCIA DE NEGOCIOS ---
 
-# Procesamiento de Datos
-with st.spinner('⚡ La IA está procesando millones de puntos de datos...'):
-    data_raw, _ = get_master_data()
+def process_business_logic(df_raw, days_analyzed):
+    df = df_raw.copy()
     
-    # Si es modo demo, data_raw ya trae todo fusionado. 
-    # Si fuera Odoo real, aquí harías el merge (como en tu código original).
-    df = data_raw.copy()
-
-    # --- CAMBIO DE TERMINOLOGÍA Y CÁLCULOS POTENTES ---
-    
-    # 1. Renombrar Columnas Técnicas a Negocio
+    # A. Renombrar a lenguaje de Negocio
     df = df.rename(columns={
-        'quantity': 'Stock_Actual',
-        'qty_sold': 'Unidades_Vendidas',
-        'revenue': 'Ventas_Totales',
-        'value': 'Valor_Inventario_Costo'
+        'quantity': 'Stock_Fisico',
+        'value': 'Capital_Invertido',
+        'qty_sold': 'Rotacion_Unidades',
+        'revenue': 'Ventas_Totales'
     })
-
-    # 2. Métricas Avanzadas
-    df['Venta_Diaria_Promedio'] = df['Unidades_Vendidas'] / dias_analisis
     
-    # Días de Inventario (Days of Inventory On Hand - DIOH)
-    # Evitamos división por cero asignando 0.001
-    df['Dias_Para_Agotar'] = df['Stock_Actual'] / df['Venta_Diaria_Promedio'].replace(0, 0.001)
+    # B. Cálculos Financieros Avanzados
+    df['Venta_Diaria'] = df['Rotacion_Unidades'] / days_analyzed
     
-    # GMROI (Gross Margin Return on Investment) - Métrica Clave de Retail
-    # Cuánto dinero gano por cada dólar invertido en inventario
-    df['GMROI'] = np.where(df['Valor_Inventario_Costo'] > 0, 
-                           df['margin'] / df['Valor_Inventario_Costo'], 
+    # Cobertura (Días de Inventario) - Evitamos división por cero
+    df['Dias_Cobertura'] = df['Stock_Fisico'] / df['Venta_Diaria'].replace(0, 0.001)
+    
+    # Precio Promedio Real
+    df['Precio_Promedio'] = df['Ventas_Totales'] / df['Rotacion_Unidades'].replace(0, 1)
+    
+    # Margen Bruto Estimado (Ventas - Costo de lo vendido)
+    # Costo de lo vendido = Unidades vendidas * Costo Unitario
+    df['Costo_Ventas'] = df['Rotacion_Unidades'] * df['cost_unit']
+    df['Margen_Bruto'] = df['Ventas_Totales'] - df['Costo_Ventas']
+    
+    # GMROI (Gross Margin Return on Investment)
+    # Cuánto gano por cada dólar invertido en inventario promedio
+    df['GMROI'] = np.where(df['Capital_Invertido'] > 0, 
+                           df['Margen_Bruto'] / df['Capital_Invertido'], 
                            0)
 
-    # 3. SEGMENTACIÓN DE MARKETING (ADIÓS A, B, C)
+    # C. Segmentación de Marketing (Pareto + Boston Matrix)
     df = df.sort_values('Ventas_Totales', ascending=False)
-    df['Ventas_Acumuladas'] = df['Ventas_Totales'].cumsum()
-    df['Porcentaje_Pareto'] = df['Ventas_Acumuladas'] / df['Ventas_Totales'].sum()
-
-    def clasificar_producto(perc, stock, dias_agot):
-        # Segmentación por Ingresos
-        if perc <= 0.80: categoria = "💎 DIAMANTE (Top Seller)"
-        elif perc <= 0.95: categoria = "🛡️ CORE (Estándar)"
-        else: categoria = "💤 HUESO (Baja Rotación)"
-        return categoria
-
-    df['Categoria_Negocio'] = df.apply(lambda x: clasificar_producto(x['Porcentaje_Pareto'], x['Stock_Actual'], x['Dias_Para_Agotar']), axis=1)
-
-    # 4. DIAGNÓSTICO IA (Lógica Avanzada)
-    def diagnostico_ia(row):
-        # Caso 1: Vende mucho y no hay stock (PÉRDIDA DE DINERO INMEDIATA)
-        if row['Stock_Actual'] <= 0 and row['Venta_Diaria_Promedio'] > 0.1:
-            return "🚨 URGENTE: Quiebre de Stock (Ventas Perdidas)"
+    df['Ventas_Acum'] = df['Ventas_Totales'].cumsum()
+    df['Pareto_Perc'] = df['Ventas_Acum'] / df['Ventas_Totales'].sum()
+    
+    def clasificar_segmento(row):
+        # Lógica combinada: Importancia en ventas vs Salud de stock
+        perc = row['Pareto_Perc']
+        dias = row['Dias_Cobertura']
         
-        # Caso 2: Diamante a punto de acabarse
-        if "DIAMANTE" in row['Categoria_Negocio'] and row['Dias_Para_Agotar'] < 15:
-            return "⚠️ ALERTA: Reabastecer Diamante (Riesgo < 15 días)"
+        tipo_producto = "C"
+        if perc <= 0.80: tipo_producto = "A"
+        elif perc <= 0.95: tipo_producto = "B"
+        
+        # Nombres comerciales
+        if tipo_producto == "A": return "💎 DIAMANTE (Vital)"
+        if tipo_producto == "C" and dias > 180: return "💀 HUESO (Obsoleto)"
+        if tipo_producto == "B": return "🛡️ CORE (Estándar)"
+        return "📉 COLA (Baja Rotación)"
+
+    df['Segmento_Mkt'] = df.apply(clasificar_segmento, axis=1)
+
+    # D. Motor de Recomendación IA
+    def motor_decision(row):
+        stock = row['Stock_Fisico']
+        dias = row['Dias_Cobertura']
+        segmento = row['Segmento_Mkt']
+        
+        if stock <= 0 and row['Rotacion_Unidades'] > 0:
+            return "🚨 URGENTE: Quiebre de Stock (Venta Perdida)"
+        
+        if "DIAMANTE" in segmento and dias < 20:
+            return "⚠️ ALERTA: Reabastecer Diamante (Riesgo)"
             
-        # Caso 3: Hueso con demasiado stock (Capital Atrapado)
-        if "HUESO" in row['Categoria_Negocio'] and row['Dias_Para_Agotar'] > 180:
-            return "💸 LIQUIDAR: Capital Atrapado (>6 meses stock)"
+        if "HUESO" in segmento:
+            return "💸 LIQUIDAR: Capital Atrapado (>6 meses)"
             
-        # Caso 4: Producto sano
+        if dias > 365:
+            return "🛑 EXCESO CRÍTICO: > 1 Año Stock"
+            
         return "✅ SALUDABLE"
 
-    df['Diagnostico_IA'] = df.apply(diagnostico_ia, axis=1)
+    df['Diagnostico_IA'] = df.apply(motor_decision, axis=1)
     
-    # Cálculo de "Dinero Perdido" (Oportunidad) y "Dinero Estancado"
-    dinero_estancado = df[df['Diagnostico_IA'].str.contains("LIQUIDAR")]['Valor_Inventario_Costo'].sum()
-    ventas_perdidas_est = df[df['Diagnostico_IA'].str.contains("URGENTE")]['Venta_Diaria_Promedio'].sum() * 30 * df['price_unit'].mean() # Estimado mensual
+    return df
 
-# --- 3. CLASE PARA GENERAR PDF EJECUTIVO ---
+# --- 3. CLASE PDF GENERATOR ---
 class PDFReport(FPDF):
     def header(self):
         self.set_font('Arial', 'B', 15)
-        self.cell(0, 10, 'NEXUS LOGISTICS - REPORTE GERENCIAL EJECUTIVO', 0, 1, 'C')
+        self.set_text_color(44, 62, 80)
+        self.cell(0, 10, 'NEXUS LOGISTICS - INFORME GERENCIAL', 0, 1, 'C')
         self.set_font('Arial', 'I', 10)
-        self.cell(0, 10, f'Generado el: {datetime.now().strftime("%d/%m/%Y %H:%M")}', 0, 1, 'C')
+        self.cell(0, 10, f'Generado: {datetime.now().strftime("%d/%m/%Y %H:%M")}', 0, 1, 'C')
         self.ln(10)
+        self.line(10, 30, 200, 30)
 
     def footer(self):
         self.set_y(-15)
         self.set_font('Arial', 'I', 8)
-        self.cell(0, 10, f'Página {self.page_no()}', 0, 0, 'C')
+        self.set_text_color(128)
+        self.cell(0, 10, f'Nexus AI System - Pagina {self.page_no()}', 0, 0, 'C')
 
-def crear_pdf(dataframe):
+def create_pdf(df):
     pdf = PDFReport()
     pdf.add_page()
     
-    # Sección 1: Resumen Financiero
-    pdf.set_font('Arial', 'B', 12)
-    pdf.set_fill_color(200, 220, 255)
-    pdf.cell(0, 10, '1. RESUMEN FINANCIERO DE ALTO NIVEL', 1, 1, 'L', 1)
-    pdf.ln(5)
+    # Métricas
+    total_ventas = df['Ventas_Totales'].sum()
+    capital_atrapado = df[df['Diagnostico_IA'].str.contains("LIQUIDAR")]['Capital_Invertido'].sum()
+    quiebres = len(df[df['Diagnostico_IA'].str.contains("URGENTE")])
     
+    # Cuerpo
+    pdf.set_font('Arial', 'B', 12)
+    pdf.cell(0, 10, '1. RESUMEN EJECUTIVO', 0, 1)
     pdf.set_font('Arial', '', 11)
-    # Datos clave
-    val_inv = dataframe['Valor_Inventario_Costo'].sum()
-    ventas = dataframe['Ventas_Totales'].sum()
+    pdf.cell(0, 8, f"Ventas Totales del Periodo: ${total_ventas:,.2f}", 0, 1)
+    pdf.set_text_color(192, 57, 43) # Rojo
+    pdf.cell(0, 8, f"Capital Atrapado (Huesos): ${capital_atrapado:,.2f}", 0, 1)
+    pdf.cell(0, 8, f"Referencias en Quiebre (Perdida Venta): {quiebres} items", 0, 1)
+    pdf.set_text_color(0)
     
-    pdf.cell(0, 8, f"Valor Total del Inventario (Costo): ${val_inv:,.2f}", 0, 1)
-    pdf.cell(0, 8, f"Ventas del Periodo: ${ventas:,.2f}", 0, 1)
-    pdf.cell(0, 8, f"Capital Estancado (Productos Hueso): ${dinero_estancado:,.2f}", 0, 1)
     pdf.ln(10)
-
-    # Sección 2: Sugerencias de la IA
     pdf.set_font('Arial', 'B', 12)
-    pdf.cell(0, 10, '2. ACCIONES CRÍTICAS SUGERIDAS POR IA', 1, 1, 'L', 1)
-    pdf.ln(5)
+    pdf.cell(0, 10, '2. ACCIONES RECOMENDADAS', 0, 1)
     
-    # Filtrar Top 5 Quiebres
-    top_quiebres = dataframe[dataframe['Diagnostico_IA'].str.contains("URGENTE")].head(5)
-    
+    # Tabla simple
     pdf.set_font('Arial', 'B', 10)
-    pdf.cell(0, 8, 'A. PRODUCTOS EN QUIEBRE (COMPRA INMEDIATA)', 0, 1)
+    pdf.cell(100, 10, 'Producto', 1)
+    pdf.cell(40, 10, 'Accion', 1)
+    pdf.cell(40, 10, 'Impacto ($)', 1)
+    pdf.ln()
+    
     pdf.set_font('Arial', '', 9)
+    # Top 10 Acciones
+    top_acciones = df[df['Diagnostico_IA'] != "✅ SALUDABLE"].sort_values('Ventas_Totales', ascending=False).head(15)
     
-    if not top_quiebres.empty:
-        for idx, row in top_quiebres.iterrows():
-            nombre = row['product_name'][:50] # Cortar nombre si es largo
-            pdf.cell(0, 6, f"- {nombre} (Dejó de venderse)", 0, 1)
-    else:
-        pdf.cell(0, 6, "Sin quiebres críticos detectados.", 0, 1)
-    
-    pdf.ln(5)
-    
-    # Filtrar Top 5 Liquidaciones
-    top_liquidar = dataframe[dataframe['Diagnostico_IA'].str.contains("LIQUIDAR")].sort_values('Valor_Inventario_Costo', ascending=False).head(5)
-    
-    pdf.set_font('Arial', 'B', 10)
-    pdf.cell(0, 8, 'B. SUGERENCIA DE LIQUIDACIÓN (RECUPERAR CAJA)', 0, 1)
-    pdf.set_font('Arial', '', 9)
-    
-    if not top_liquidar.empty:
-        for idx, row in top_liquidar.iterrows():
-            nombre = row['product_name'][:50]
-            valor = row['Valor_Inventario_Costo']
-            pdf.cell(0, 6, f"- {nombre} | Atrapado: ${valor:,.0f}", 0, 1)
-            
-    pdf.ln(10)
-    pdf.set_font('Arial', 'I', 8)
-    pdf.cell(0, 10, 'Este reporte es generado automáticamente por el motor Nexus Logistics AI.', 0, 1, 'C')
-    
+    for _, row in top_acciones.iterrows():
+        name = (row['product_name'][:45] + '..') if len(row['product_name']) > 45 else row['product_name']
+        action = "COMPRAR" if "URGENTE" in row['Diagnostico_IA'] else "LIQUIDAR"
+        val = row['Ventas_Totales'] if action == "COMPRAR" else row['Capital_Invertido']
+        
+        pdf.cell(100, 8, name, 1)
+        pdf.cell(40, 8, action, 1)
+        pdf.cell(40, 8, f"${val:,.0f}", 1)
+        pdf.ln()
+        
     return pdf.output(dest='S').encode('latin-1')
 
-# --- 4. INTERFAZ VISUAL DEL DASHBOARD ---
+# --- 4. INTERFAZ PRINCIPAL (SIDEBAR) ---
 
-st.title("📊 Tablero de Mando Gerencial")
-st.markdown("Visión estratégica del inventario y ventas en tiempo real.")
-
-# PESTAÑAS MEJORADAS
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "👔 Resumen Ejecutivo", 
-    "📈 Matriz de Rentabilidad", 
-    "🧠 Diagnóstico IA", 
-    "📉 Gestión de Pérdidas",
-    "📤 Exportación & Reportes"
-])
-
-# --- TAB 1: RESUMEN EJECUTIVO (BOARDROOM VIEW) ---
-with tab1:
-    st.markdown("### 🏦 Estado de Salud Financiera")
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-        st.metric("Ventas Totales", f"${df['Ventas_Totales'].sum():,.0f}", delta="Periodo Actual")
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-    with col2:
-        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-        st.metric("Capital en Bodega", f"${df['Valor_Inventario_Costo'].sum():,.0f}", delta="Costo Activo")
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    with col3:
-        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-        roi_promedio = df['GMROI'].mean()
-        st.metric("GMROI Promedio", f"{roi_promedio:.2f}x", delta="Eficiencia Inversión", delta_color="normal")
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    with col4:
-        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-        skus_activos = len(df[df['Stock_Actual'] > 0])
-        st.metric("Referencias Activas", f"{skus_activos}", delta="SKUs en Bodega")
-        st.markdown('</div>', unsafe_allow_html=True)
-
+with st.sidebar:
+    st.image("https://cdn-icons-png.flaticon.com/512/882/882706.png", width=60)
+    st.markdown("## 💎 Nexus Logistics AI")
     st.markdown("---")
     
-    c_chart, c_insight = st.columns([2, 1])
+    st.subheader("⚙️ Configuración de Análisis")
     
-    with c_chart:
-        st.subheader("Segmentación de Portafolio (Regla 80/20)")
-        fig_pie = px.sunburst(
+    dias_analisis = st.slider("Ventana de Tiempo (Días)", 30, 365, 90)
+    st.info(f"Analizando rotación basada en los últimos {dias_analisis} días.")
+    
+    st.markdown("---")
+    admin_phone = st.text_input("📱 WhatsApp Gerencial", "573001234567")
+    
+    # Estado de Conexión
+    if CONNECTION_ACTIVE:
+        st.success("🟢 Conectado a Odoo ERP")
+    else:
+        st.warning("⚠️ Modo DEMO (Datos Simulados)")
+
+# --- 5. LÓGICA DE EJECUCIÓN PRINCIPAL ---
+
+# Carga de datos
+with st.spinner('🔄 Sincronizando con ERP y procesando algoritmos...'):
+    raw_data, is_real = get_master_data()
+    df = process_business_logic(raw_data, dias_analisis)
+
+# KPIs Principales (Header)
+st.title("Tablero de Mando Integral")
+
+col1, col2, col3, col4 = st.columns(4)
+
+with col1:
+    st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+    st.metric("Ingresos Totales", f"${df['Ventas_Totales'].sum():,.0f}", delta="Periodo Seleccionado")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+with col2:
+    st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+    st.metric("Capital Invertido", f"${df['Capital_Invertido'].sum():,.0f}", delta="Costo Inventario")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+with col3:
+    st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+    # ROI Promedio Ponderado
+    roi = df['GMROI'].mean()
+    st.metric("GMROI (Eficiencia)", f"{roi:.2f}x", delta="Retorno x $ Invertido")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+with col4:
+    st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+    health = len(df[df['Diagnostico_IA'] == "✅ SALUDABLE"]) / len(df) * 100
+    st.metric("Salud de Inventario", f"{health:.1f}%", delta="Referencias Sanas")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# --- PESTAÑAS DE ANÁLISIS ---
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "👔 Visión Estratégica", 
+    "📊 Matriz Rentabilidad", 
+    "🤖 Diagnóstico IA", 
+    "📉 Capital Atrapado", 
+    "📤 Reportes & Exportación"
+])
+
+# TAB 1: ESTRATEGIA
+with tab1:
+    c_pie, c_desc = st.columns([2, 1])
+    with c_pie:
+        st.subheader("Composición del Portafolio (Estrategia Diamante)")
+        fig_sun = px.sunburst(
             df, 
-            path=['Categoria_Negocio', 'category'], 
+            path=['Segmento_Mkt', 'category'], 
             values='Ventas_Totales',
-            color='Categoria_Negocio',
+            color='Segmento_Mkt',
             color_discrete_map={
-                '💎 DIAMANTE (Top Seller)': '#2ECC71',
+                '💎 DIAMANTE (Vital)': '#2ECC71',
                 '🛡️ CORE (Estándar)': '#F1C40F',
-                '💤 HUESO (Baja Rotación)': '#E74C3C'
+                '💀 HUESO (Obsoleto)': '#E74C3C',
+                '📉 COLA (Baja Rotación)': '#95A5A6'
             },
-            title="Distribución de Ingresos por Tipo de Producto"
+            title="Distribución de Ingresos por Segmento"
         )
-        st.plotly_chart(fig_pie, use_container_width=True)
-        
-    with c_insight:
-        st.info("💡 **Insight Gerencial:**")
-        st.markdown(f"""
-        Tus productos **Diamante** representan el motor de tu empresa. 
-        
-        Actualmente tienes **{len(df[df['Categoria_Negocio'].contains('DIAMANTE')])} referencias** que sostienen el 80% de la facturación.
-        
-        **Estrategia:**
-        1. Nunca permitir Stockout en Diamantes.
-        2. Liquidar agresivamente los Huesos para liberar caja.
+        st.plotly_chart(fig_sun, use_container_width=True)
+    
+    with c_desc:
+        st.info("💡 **Interpretación Gerencial:**")
+        st.markdown("""
+        * **💎 DIAMANTES:** Generan el 80% de tu flujo de caja. **Prioridad: Cero Quiebres.**
+        * **🛡️ CORE:** Productos complementarios. Mantener stock saludable.
+        * **💀 HUESOS:** Consumen capital y espacio pero no generan dinero. **Prioridad: Liquidar.**
         """)
 
-# --- TAB 2: MATRIZ DE RENTABILIDAD ---
+# TAB 2: MATRIZ
 with tab2:
-    st.subheader("🔎 Análisis Cruzado: Rotación vs Rentabilidad")
-    
-    # Scatter Plot avanzado
-    fig_matrix = px.scatter(
-        df[df['Stock_Actual'] > 0],
-        x="Dias_Para_Agotar",
+    st.subheader("Matriz de Eficiencia: Velocidad vs Retorno")
+    fig_scatter = px.scatter(
+        df[df['Stock_Fisico'] > 0],
+        x="Dias_Cobertura",
         y="GMROI",
         size="Ventas_Totales",
-        color="Categoria_Negocio",
+        color="Segmento_Mkt",
         hover_name="product_name",
         log_x=True,
-        title="Matriz de Eficiencia: ¿Qué tan rápido recupero mi inversión?",
-        labels={
-            "Dias_Para_Agotar": "Días de Cobertura (Log)",
-            "GMROI": "Retorno sobre Inversión (x veces)"
-        },
-        height=500,
+        title="Análisis de Burbuja (Tamaño = Ventas)",
+        labels={"Dias_Cobertura": "Días para Agotar Stock (Log)", "GMROI": "Retorno de Inversión (Veces)"},
         color_discrete_map={
-            '💎 DIAMANTE (Top Seller)': '#2ECC71',
+            '💎 DIAMANTE (Vital)': '#2ECC71',
             '🛡️ CORE (Estándar)': '#F1C40F',
-            '💤 HUESO (Baja Rotación)': '#E74C3C'
+            '💀 HUESO (Obsoleto)': '#E74C3C',
+            '📉 COLA (Baja Rotación)': '#95A5A6'
         }
     )
-    # Cuadrantes estratégicos
-    fig_matrix.add_vline(x=45, line_dash="dot", line_color="grey", annotation_text="Límite Saludable (45 días)")
-    fig_matrix.add_hline(y=1, line_dash="dot", line_color="grey", annotation_text="Punto Equilibrio")
-    
-    st.plotly_chart(fig_matrix, use_container_width=True)
-    st.caption("Nota: El tamaño de la burbuja representa el volumen de ventas total.")
+    # Cuadrantes
+    fig_scatter.add_vline(x=45, line_dash="dash", line_color="grey", annotation_text="Límite Sano")
+    st.plotly_chart(fig_scatter, use_container_width=True)
 
-# --- TAB 3: DIAGNÓSTICO IA ---
+# TAB 3: DIAGNÓSTICO IA
 with tab3:
-    st.header("🧠 El Cerebro Digital Sugiere:")
+    col_alert, col_filt = st.columns([3, 1])
+    with col_filt:
+        st.markdown("<br>", unsafe_allow_html=True)
+        filtro = st.radio("Filtrar Acción:", ["🚨 URGENTE (Quiebres)", "⚠️ ALERTAS (Riesgo)", "💸 LIQUIDAR (Exceso)", "TODO"])
     
-    col_kpi1, col_kpi2, col_kpi3 = st.columns(3)
-    col_kpi1.error(f"🚨 {len(df[df['Diagnostico_IA'].contains('URGENTE')])} Productos en Quiebre")
-    col_kpi2.warning(f"⚠️ {len(df[df['Diagnostico_IA'].contains('ALERTA')])} Diamantes en Riesgo")
-    col_kpi3.info(f"💸 {len(df[df['Diagnostico_IA'].contains('LIQUIDAR')])} Candidatos a Liquidación")
-    
-    st.divider()
-    
-    filtro_ia = st.selectbox("Filtrar Recomendación:", 
-                             ["🚨 Ver Urgencias (Quiebres)", 
-                              "⚠️ Ver Alertas (Riesgo Stock)", 
-                              "💸 Ver Para Liquidar (Exceso)", 
-                              "Todo el Inventario"])
-    
-    df_show = df.copy()
-    if "Urgencias" in filtro_ia:
-        df_show = df[df['Diagnostico_IA'].str.contains("URGENTE")]
-    elif "Alertas" in filtro_ia:
-        df_show = df[df['Diagnostico_IA'].str.contains("ALERTA")]
-    elif "Liquidar" in filtro_ia:
-        df_show = df[df['Diagnostico_IA'].str.contains("LIQUIDAR")]
-        
-    st.dataframe(
-        df_show[['product_name', 'Stock_Actual', 'Venta_Diaria_Promedio', 'Dias_Para_Agotar', 'Diagnostico_IA']],
-        use_container_width=True,
-        column_config={
-            "Stock_Actual": st.column_config.NumberColumn("Stock", format="%d u"),
-            "Venta_Diaria_Promedio": st.column_config.NumberColumn("Velocidad Venta", format="%.1f u/día"),
-            "Dias_Para_Agotar": st.column_config.ProgressColumn("Cobertura (Días)", min_value=0, max_value=180, format="%d días"),
-        }
-    )
+    with col_alert:
+        st.subheader("📋 Plan de Acción Generado por IA")
+        if filtro == "TODO":
+            df_view = df[df['Diagnostico_IA'] != "✅ SALUDABLE"]
+        elif "URGENTE" in filtro:
+            df_view = df[df['Diagnostico_IA'].str.contains("URGENTE")]
+        elif "ALERTAS" in filtro:
+            df_view = df[df['Diagnostico_IA'].str.contains("ALERTA")]
+        else:
+            df_view = df[df['Diagnostico_IA'].str.contains("LIQUIDAR|EXCESO")]
+            
+        st.dataframe(
+            df_view[['product_name', 'Stock_Fisico', 'Dias_Cobertura', 'GMROI', 'Diagnostico_IA']],
+            use_container_width=True,
+            column_config={
+                "Dias_Cobertura": st.column_config.NumberColumn("Días Stock", format="%d d"),
+                "GMROI": st.column_config.NumberColumn("ROI", format="%.2fx"),
+            }
+        )
 
-# --- TAB 4: GESTIÓN DE PÉRDIDAS (CAPITAL TRAP) ---
+# TAB 4: CAPITAL ATRAPADO
 with tab4:
-    st.subheader("📉 ¿Dónde estoy perdiendo dinero?")
+    dinero_hueso = df[df['Diagnostico_IA'].str.contains("LIQUIDAR")]['Capital_Invertido'].sum()
+    st.subheader("📉 Análisis de Pérdidas de Oportunidad")
     
     c_loss1, c_loss2 = st.columns(2)
-    
     with c_loss1:
-        st.markdown("#### 🐢 Capital Atrapado (Inventario Lento)")
-        st.markdown(f"<h2 style='color: #E74C3C'>${dinero_estancado:,.0f}</h2>", unsafe_allow_html=True)
-        st.write("Dinero invertido en productos 'Hueso' con cobertura > 180 días. Este dinero no está circulando.")
+        st.error(f"💰 Capital Estancado (Huesos): ${dinero_hueso:,.0f}")
+        st.markdown("Este es dinero congelado en bodega que podrías usar para comprar más 'Diamantes'.")
         
     with c_loss2:
-        st.markdown("#### 🛑 Ventas Perdidas Estimadas (Mensual)")
-        st.markdown(f"<h2 style='color: #E74C3C'>${ventas_perdidas_est:,.0f}</h2>", unsafe_allow_html=True)
-        st.write("Ingresos que DEJAMOS de recibir por no tener stock en productos de alta rotación (Quiebres).")
+        top_huesos = df[df['Diagnostico_IA'].str.contains("LIQUIDAR")].sort_values('Capital_Invertido', ascending=False).head(5)
+        st.write("**Top 5 Productos que están 'secuestrando' tu capital:**")
+        if not top_huesos.empty:
+            st.table(top_huesos[['product_name', 'Capital_Invertido']])
+        else:
+            st.success("¡Tu inventario está limpio! No hay capital atrapado significativo.")
 
-    # Gráfico de barras de los productos que más retienen capital
-    top_huesos = df[df['Diagnostico_IA'].str.contains("LIQUIDAR")].sort_values('Valor_Inventario_Costo', ascending=False).head(10)
-    
-    if not top_huesos.empty:
-        fig_trap = px.bar(top_huesos, x='Valor_Inventario_Costo', y='product_name', orientation='h',
-                          title="Top 10 Productos Atrapando Capital (Urge Liquidar)",
-                          color='Valor_Inventario_Costo', color_continuous_scale='Reds')
-        st.plotly_chart(fig_trap, use_container_width=True)
-    else:
-        st.success("¡Excelente! No tienes capital atrapado significativo.")
-
-# --- TAB 5: EXPORTACIÓN Y REPORTES ---
+# TAB 5: REPORTES
 with tab5:
-    st.header("🖨️ Centro de Reportes Corporativos")
+    st.header("🖨️ Centro de Exportación")
     
-    col_pdf, col_excel, col_wa = st.columns(3)
+    col_r1, col_r2, col_r3 = st.columns(3)
     
-    # 1. EXCEL MAESTRO
-    def generate_excel(df):
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            df.to_excel(writer, sheet_name='Master Data', index=False)
-            df[df['Diagnostico_IA'].str.contains("URGENTE")].to_excel(writer, sheet_name='A_Comprar', index=False)
-            df[df['Diagnostico_IA'].str.contains("LIQUIDAR")].to_excel(writer, sheet_name='A_Liquidar', index=False)
+    # EXCEL
+    with col_r1:
+        st.subheader("📊 Excel Data Master")
+        def to_excel(df):
+            output = BytesIO()
+            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                df.to_excel(writer, sheet_name='Analisis_Completo', index=False)
+                df[df['Diagnostico_IA'].str.contains("URGENTE")].to_excel(writer, sheet_name='Orden_Compra', index=False)
+            return output.getvalue()
             
-            # Formato condicional básico
-            workbook = writer.book
-            worksheet = writer.sheets['Master Data']
-            money_fmt = workbook.add_format({'num_format': '$#,##0'})
-            worksheet.set_column('E:H', 15, money_fmt)
-            
-        return output.getvalue()
-        
-    with col_excel:
-        st.subheader("📊 Data Cruda (Excel)")
-        st.markdown("Descarga el dataset completo con todas las métricas calculadas para tu equipo de análisis.")
-        excel_data = generate_excel(df)
         st.download_button(
-            label="📥 Descargar Excel (.xlsx)",
-            data=excel_data,
+            "📥 Descargar Excel (.xlsx)",
+            data=to_excel(df),
             file_name=f"Nexus_Data_{datetime.now().date()}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-
-    # 2. PDF EJECUTIVO
-    with col_pdf:
-        st.subheader("📄 Reporte PDF Gerencial")
-        st.markdown("Genera un resumen ejecutivo formal listo para imprimir y presentar en juntas directivas.")
         
-        if st.button("Generar PDF Ejecutivo"):
-            with st.spinner("Redactando informe..."):
-                pdf_bytes = crear_pdf(df)
-                b64 = base64.b64encode(pdf_bytes).decode()
-                href = f'<a href="data:application/octet-stream;base64,{b64}" download="Reporte_Gerencial_Nexus.pdf" style="text-decoration:none;"><button style="background-color:#E74C3C;color:white;padding:10px;border:none;border-radius:5px;cursor:pointer;width:100%">📄 Descargar PDF Listo</button></a>'
-                st.markdown(href, unsafe_allow_html=True)
-
-    # 3. WHATSAPP BOT
-    with col_wa:
-        st.subheader("📲 Alerta Rápida")
-        st.markdown("Envía las métricas críticas directamente al WhatsApp del Gerente.")
-        
-        msg = f"*NEXUS REPORT - {datetime.now().date()}*\n\n"
-        msg += f"💰 Ventas: ${df['Ventas_Totales'].sum():,.0f}\n"
-        msg += f"🐢 Cap. Atrapado: ${dinero_estancado:,.0f}\n"
-        msg += f"🚨 Quiebres Críticos: {len(df[df['Diagnostico_IA'].str.contains('URGENTE')])}\n\n"
-        msg += "_Enviado desde Nexus AI_"
+    # PDF
+    with col_r2:
+        st.subheader("📄 Reporte Ejecutivo PDF")
+        if st.button("Generar Informe Gerencial"):
+            pdf_data = create_pdf(df)
+            b64 = base64.b64encode(pdf_data).decode()
+            href = f'<a href="data:application/octet-stream;base64,{b64}" download="Nexus_Report.pdf" style="text-decoration:none;"><button style="width:100%;padding:10px;background:#E74C3C;color:white;border:none;border-radius:5px;cursor:pointer;">⬇️ Descargar PDF Listo</button></a>'
+            st.markdown(href, unsafe_allow_html=True)
+            
+    # WHATSAPP
+    with col_r3:
+        st.subheader("📲 Alerta Gerencial")
+        msg = f"*REPORTE NEXUS {datetime.now().date()}*\n\n"
+        msg += f"✅ Ventas: ${df['Ventas_Totales'].sum():,.0f}\n"
+        msg += f"🚨 Quiebres Críticos: {len(df[df['Diagnostico_IA'].str.contains('URGENTE')])}\n"
+        msg += f"🐢 Dinero Atrapado: ${dinero_hueso:,.0f}\n"
+        msg += "\n_Generado por Nexus AI_"
         
         encoded_msg = urllib.parse.quote(msg)
-        wa_link = f"https://wa.me/{admin_phone}?text={encoded_msg}"
-        
         st.markdown(f"""
-            <a href="{wa_link}" target="_blank">
-                <button style="background-color:#25D366;color:white;border:none;padding:10px;border-radius:5px;width:100%;cursor:pointer;">
-                    🚀 Enviar a WhatsApp
-                </button>
-            </a>
+        <a href="https://wa.me/{admin_phone}?text={encoded_msg}" target="_blank">
+            <button style="width:100%;padding:10px;background:#25D366;color:white;border:none;border-radius:5px;cursor:pointer;">🚀 Enviar WhatsApp</button>
+        </a>
         """, unsafe_allow_html=True)
 
-st.divider()
-st.caption("Nexus Logistics AI System v3.0 Ultra | Powered by Python & Streamlit")
+st.caption("Nexus Logistics AI System v3.0 | Powered by Python & Streamlit")
