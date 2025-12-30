@@ -11,7 +11,7 @@ from fpdf import FPDF
 
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(
-    page_title="Nexus Logistics AI | Executive Suite", 
+    page_title="Nexus Pro AI | Executive Suite", 
     layout="wide", 
     page_icon="💎",
     initial_sidebar_state="expanded"
@@ -224,7 +224,7 @@ class PDFReport(FPDF):
     def header(self):
         self.set_font('Arial', 'B', 15)
         self.set_text_color(44, 62, 80)
-        self.cell(0, 10, 'NEXUS LOGISTICS - INFORME GERENCIAL', 0, 1, 'C')
+        self.cell(0, 10, 'NEXUS PRO - INFORME GERENCIAL', 0, 1, 'C')
         self.set_font('Arial', 'I', 10)
         self.cell(0, 10, f'Generado: {datetime.now().strftime("%d/%m/%Y %H:%M")}', 0, 1, 'C')
         self.ln(10)
@@ -286,7 +286,7 @@ def create_pdf(df):
 
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/882/882706.png", width=60)
-    st.markdown("## 💎 Nexus Logistics AI")
+    st.markdown("## 💎 Nexus PRO AI")
     st.markdown("---")
     
     st.subheader("⚙️ Configuración de Análisis")
@@ -492,4 +492,4 @@ with tab5:
         </a>
         """, unsafe_allow_html=True)
 
-st.caption("Nexus Logistics AI System v3.0 | Powered by Python & Streamlit")
+st.caption("Nexus PRO AI System v3.0 | Powered by Nexus")
