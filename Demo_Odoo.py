@@ -78,7 +78,7 @@ if st.button(f"🔍 Analizar {model_name}"):
         else:
             # PESTAÑA 1: ESTRUCTURA (QUÉ CAMPOS EXISTEN)
             st.subheader(f"Estructura de: {model_name}")
-            st.info("Usa la columna 'Field Name' en tu código Python.")
+            st.info("Conectado y Leyendo Informacion")
             st.dataframe(structure[['Field Name', 'string', 'type']], use_container_width=True, hide_index=True)
             
             # PESTAÑA 2: DATOS REALES (QUÉ CONTIENEN)
