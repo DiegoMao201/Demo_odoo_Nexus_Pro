@@ -9,21 +9,29 @@ import urllib.parse
 import base64
 from fpdf import FPDF
 
-# --- CONFIGURACIÓN DE PÁGINA (AQUÍ SE DEFINE EL NOMBRE DE LA PESTAÑA) ---
+# --- 1. CONFIGURACIÓN DE SEGURIDAD Y PÁGINA ---
+# Esta sección bloquea el menú de "View Source" nativo de Streamlit
 st.set_page_config(
     page_title="NEXUS PRO IA", 
     layout="wide", 
     page_icon="💎",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
+    menu_items={
+        'Get Help': None,
+        'Report a bug': None,
+        'About': None
+    }
 )
 
-# --- ESTILOS CSS PRO (LIMPIEZA VISUAL) ---
+# --- 2. ESTILOS CSS BLINDADOS (VISUALIZACIÓN PRO) ---
 st.markdown("""
 <style>
-    /* Ocultar menú hamburguesa y footer de Streamlit por defecto si se desea limpieza total */
+    /* BLOQUEO VISUAL TOTAL DE MENÚS STREAMLIT */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
+    header {visibility: hidden;}
     
+    /* ESTILOS DE LA INTERFAZ PRO */
     .metric-card {
         background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
         border-radius: 15px; 
@@ -32,6 +40,10 @@ st.markdown("""
         text-align: center;
         border-left: 5px solid #2E86C1;
         margin-bottom: 10px;
+    }
+    div[data-testid="stMetricValue"] {
+        font-size: 24px;
+        color: #1B4F72;
     }
     .stTabs [data-baseweb="tab-list"] { gap: 10px; }
     .stTabs [data-baseweb="tab"] {
@@ -49,9 +61,9 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- 1. MÓDULO DE CONEXIÓN Y DATOS ---
+# --- 3. MÓDULO DE CONEXIÓN Y DATOS ---
 
-# Intentamos importar el cliente Odoo. Si falla, activamos modo DEMO.
+# Intentamos importar el cliente Odoo. Si falla, activamos modo DEMO silenciosamente.
 try:
     from odoo_client import OdooConnector
     CONNECTION_ACTIVE = True
@@ -96,7 +108,7 @@ def generate_mock_data():
 def get_master_data():
     """
     Función MAESTRA de obtención de datos.
-    Integra Odoo y maneja la fusión (Merge) aquí para evitar errores en la UI.
+    Integra Odoo y maneja la fusión (Merge).
     """
     if CONNECTION_ACTIVE:
         try:
@@ -109,7 +121,7 @@ def get_master_data():
             if df_stock.empty and df_sales.empty:
                 return generate_mock_data(), False
 
-            # 2. Agrupación segura (evitar duplicados de líneas)
+            # 2. Agrupación segura
             stock_gb = df_stock.groupby('product_name').agg({
                 'quantity': 'sum', 
                 'value': 'sum'
@@ -121,12 +133,10 @@ def get_master_data():
             }).reset_index()
 
             # 3. MERGE (Fusión) OUTER JOIN
-            # Esto asegura que tengamos productos con stock pero sin ventas y viceversa
             df_final = pd.merge(stock_gb, sales_gb, on='product_name', how='outer').fillna(0)
             
-            # 4. Enriquecimiento de datos (Categoría dummy si no viene de Odoo)
+            # 4. Enriquecimiento de datos
             df_final['category'] = 'General'
-            # Costo unitario estimado para cálculos
             df_final['cost_unit'] = np.where(df_final['quantity'] > 0, 
                                             df_final['value'] / df_final['quantity'], 
                                             0)
@@ -134,12 +144,11 @@ def get_master_data():
             return df_final, True
 
         except Exception as e:
-            print(f"Error de conexión Odoo: {e}")
-            return generate_mock_data(), False # Fallback a Demo
+            return generate_mock_data(), False 
     else:
         return generate_mock_data(), False
 
-# --- 2. MOTOR DE INTELIGENCIA DE NEGOCIOS ---
+# --- 4. MOTOR DE INTELIGENCIA DE NEGOCIOS (BI ENGINE) ---
 
 def process_business_logic(df_raw, days_analyzed):
     df = df_raw.copy()
@@ -155,30 +164,27 @@ def process_business_logic(df_raw, days_analyzed):
     # B. Cálculos Financieros Avanzados
     df['Venta_Diaria'] = df['Rotacion_Unidades'] / days_analyzed
     
-    # Cobertura (Días de Inventario) - Evitamos división por cero
+    # Cobertura (Días de Inventario)
     df['Dias_Cobertura'] = df['Stock_Fisico'] / df['Venta_Diaria'].replace(0, 0.001)
     
     # Precio Promedio Real
     df['Precio_Promedio'] = df['Ventas_Totales'] / df['Rotacion_Unidades'].replace(0, 1)
     
-    # Margen Bruto Estimado (Ventas - Costo de lo vendido)
-    # Costo de lo vendido = Unidades vendidas * Costo Unitario
+    # Margen Bruto Estimado
     df['Costo_Ventas'] = df['Rotacion_Unidades'] * df['cost_unit']
     df['Margen_Bruto'] = df['Ventas_Totales'] - df['Costo_Ventas']
     
     # GMROI (Gross Margin Return on Investment)
-    # Cuánto gano por cada dólar invertido en inventario promedio
     df['GMROI'] = np.where(df['Capital_Invertido'] > 0, 
                            df['Margen_Bruto'] / df['Capital_Invertido'], 
                            0)
 
-    # C. Segmentación de Marketing (Pareto + Boston Matrix)
+    # C. Segmentación de Marketing (Pareto)
     df = df.sort_values('Ventas_Totales', ascending=False)
     df['Ventas_Acum'] = df['Ventas_Totales'].cumsum()
     df['Pareto_Perc'] = df['Ventas_Acum'] / df['Ventas_Totales'].sum()
     
     def clasificar_segmento(row):
-        # Lógica combinada: Importancia en ventas vs Salud de stock
         perc = row['Pareto_Perc']
         dias = row['Dias_Cobertura']
         
@@ -186,7 +192,6 @@ def process_business_logic(df_raw, days_analyzed):
         if perc <= 0.80: tipo_producto = "A"
         elif perc <= 0.95: tipo_producto = "B"
         
-        # Nombres comerciales
         if tipo_producto == "A": return "💎 DIAMANTE (Vital)"
         if tipo_producto == "C" and dias > 180: return "💀 HUESO (Obsoleto)"
         if tipo_producto == "B": return "🛡️ CORE (Estándar)"
@@ -218,7 +223,7 @@ def process_business_logic(df_raw, days_analyzed):
     
     return df
 
-# --- 3. CLASE PDF GENERATOR ---
+# --- 5. CLASE GENERADOR PDF ---
 class PDFReport(FPDF):
     def header(self):
         self.set_font('Arial', 'B', 15)
@@ -281,13 +286,12 @@ def create_pdf(df):
         
     return pdf.output(dest='S').encode('latin-1')
 
-# --- 4. INTERFAZ PRINCIPAL (SIDEBAR) ---
+# --- 6. INTERFAZ PRINCIPAL (SIDEBAR) ---
 
 with st.sidebar:
-    # Si quieres quitar el logo de diamante y poner uno tuyo, cambia la URL aquí
+    # URL de ícono genérico profesional
     st.image("https://cdn-icons-png.flaticon.com/512/882/882706.png", width=60)
     
-    # --- AQUÍ ESTÁ EL CAMBIO DE NOMBRE ---
     st.markdown("## 💎 NEXUS PRO IA")
     st.markdown("---")
     
@@ -305,7 +309,7 @@ with st.sidebar:
     else:
         st.warning("⚠️ Modo DEMO (Datos Simulados)")
 
-# --- 5. LÓGICA DE EJECUCIÓN PRINCIPAL ---
+# --- 7. LÓGICA DE EJECUCIÓN UI ---
 
 # Carga de datos
 with st.spinner('🔄 Sincronizando con ERP y procesando algoritmos...'):
@@ -313,7 +317,6 @@ with st.spinner('🔄 Sincronizando con ERP y procesando algoritmos...'):
     df = process_business_logic(raw_data, dias_analisis)
 
 # KPIs Principales (Header)
-# --- AQUÍ TAMBIÉN ESTÁ EL CAMBIO DE NOMBRE ---
 st.title("💎 NEXUS PRO IA | Dashboard Gerencial")
 
 col1, col2, col3, col4 = st.columns(4)
@@ -330,7 +333,6 @@ with col2:
 
 with col3:
     st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-    # ROI Promedio Ponderado
     roi = df['GMROI'].mean()
     st.metric("GMROI (Eficiencia)", f"{roi:.2f}x", delta="Retorno x $ Invertido")
     st.markdown('</div>', unsafe_allow_html=True)
@@ -398,7 +400,6 @@ with tab2:
             '📉 COLA (Baja Rotación)': '#95A5A6'
         }
     )
-    # Cuadrantes
     fig_scatter.add_vline(x=45, line_dash="dash", line_color="grey", annotation_text="Límite Sano")
     st.plotly_chart(fig_scatter, use_container_width=True)
 
