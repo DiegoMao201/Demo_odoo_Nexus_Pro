@@ -4,105 +4,86 @@ import streamlit as st
 
 class OdooConnector:
     def __init__(self):
-        # 1. Cargar credenciales
+        # Cargar credenciales
         try:
             secrets = st.secrets["odoo_connection"]
             self.url = secrets["url"]
+            self.db = secrets["db"]
             self.username = secrets["username"]
-            self.password = secrets["password"] # Aquí usaremos tu API Key
-            self.db = secrets.get("db", "").strip() # Puede estar vacío
-        except Exception:
-            st.error("Error: Falta el archivo .streamlit/secrets.toml o los datos están incompletos.")
-            st.stop()
-
-        # 2. Auto-descubrir Base de Datos si no se proporcionó
-        if not self.db:
-            self.db = self._discover_db()
-            if not self.db:
-                st.error("No se pudo detectar ninguna base de datos en esa URL. Necesitas conseguir el nombre exacto.")
+            self.password = secrets["password"]
+            
+            # Conexión
+            common = xmlrpc.client.ServerProxy(f'{self.url}/xmlrpc/2/common')
+            self.uid = common.authenticate(self.db, self.username, self.password, {})
+            self.models = xmlrpc.client.ServerProxy(f'{self.url}/xmlrpc/2/object')
+            
+            if not self.uid:
+                st.error("Error de credenciales Odoo.")
                 st.stop()
-            else:
-                # Mostramos en sidebar a qué DB se conectó (útil para verificar)
-                st.sidebar.info(f"📡 DB Detectada: {self.db}")
-
-        # 3. Configurar Endpoints
-        try:
-            self.common = xmlrpc.client.ServerProxy('{}/xmlrpc/2/common'.format(self.url))
-            self.models = xmlrpc.client.ServerProxy('{}/xmlrpc/2/object'.format(self.url))
-            self.uid = self._authenticate()
+                
         except Exception as e:
-            st.error(f"Error de conexión general con Odoo: {e}")
+            st.error(f"Error de conexión: {e}")
             st.stop()
 
-    def _discover_db(self):
-        """Consulta al servidor la lista de bases de datos disponibles"""
+    def get_stock_clean(self):
+        """
+        Trae el stock usando los campos confirmados: 'quantity' y 'value'.
+        """
         try:
-            # Endpoint especial para listar bases de datos
-            db_proxy = xmlrpc.client.ServerProxy('{}/xmlrpc/2/db'.format(self.url))
-            dbs = db_proxy.list()
-            if dbs and isinstance(dbs, list):
-                return dbs[0] # Retorna la primera que encuentre
-            return None
+            # Filtramos solo ubicaciones internas
+            domain = [['location_id.usage', '=', 'internal']]
+            fields = ['product_id', 'quantity', 'value', 'location_id']
+            
+            data = self.models.execute_kw(self.db, self.uid, self.password,
+                'stock.quant', 'search_read', [domain], {'fields': fields, 'limit': 3000})
+            
+            if data:
+                df = pd.DataFrame(data)
+                
+                # --- LIMPIEZA CRÍTICA (Evita errores de PyArrow) ---
+                # Extraemos el nombre del producto de la lista [ID, "Nombre"]
+                df['product_name'] = df['product_id'].apply(lambda x: x[1] if isinstance(x, list) else 'N/A')
+                # Extraemos nombre de ubicación
+                df['location_name'] = df['location_id'].apply(lambda x: x[1] if isinstance(x, list) else 'N/A')
+                
+                # Aseguramos que los números sean números
+                df['quantity'] = df['quantity'].fillna(0).astype(float)
+                df['value'] = df['value'].fillna(0).astype(float)
+                
+                return df[['product_name', 'quantity', 'value', 'location_name']]
+            
+            return pd.DataFrame(columns=['product_name', 'quantity', 'value', 'location_name'])
+            
         except Exception as e:
-            st.warning(f"No se pudo auto-detectar la base de datos: {e}")
-            return None
-
-    def _authenticate(self):
-        """Autentica usando la API Key como password"""
-        try:
-            uid = self.common.authenticate(self.db, self.username, self.password, {})
-            if not uid:
-                st.error("❌ Fallo de autenticación. Verifica que tu API Key sea correcta y el usuario tenga permisos.")
-                st.stop()
-            return uid
-        except Exception as e:
-            st.error(f"Error autenticando: {e}")
-            st.stop()
-
-    def get_data(self, model_name, fields, domain=None, limit=1000):
-        """Función genérica de consulta"""
-        if domain is None: domain = []
-        try:
-            records = self.models.execute_kw(
-                self.db, self.uid, self.password,
-                model_name, 'search_read',
-                [domain],
-                {'fields': fields, 'limit': limit}
-            )
-            return pd.DataFrame(records) if records else pd.DataFrame()
-        except Exception as e:
-            st.error(f"Error consultando modelo {model_name}: {e}")
+            st.error(f"Error bajando stock: {e}")
             return pd.DataFrame()
 
-    def get_stock_analysis(self):
+    def get_sales_clean(self):
         """
-        Trae datos combinados para análisis de rotación.
-        Nota: Ajustado para buscar en 'product.product' y 'stock.quant'
+        Trae ventas usando 'create_date' y 'product_uom_qty'.
         """
-        # 1. Traemos el stock actual
-        domain = [['location_id.usage', '=', 'internal']] # Solo bodegas internas
-        fields = ['product_id', 'quantity', 'location_id', 'in_date']
-        df_stock = self.get_data('stock.quant', fields, domain, limit=1500)
-        
-        if not df_stock.empty:
-            # Limpieza de nombres que vienen como [id, nombre]
-            df_stock['product_name'] = df_stock['product_id'].apply(lambda x: x[1] if x else 'Descocido')
-            df_stock['location_name'] = df_stock['location_id'].apply(lambda x: x[1] if x else 'Descocido')
-            # Rellenar nulos
-            df_stock['quantity'] = df_stock['quantity'].fillna(0)
+        try:
+            # Ventas confirmadas o realizadas
+            domain = [['state', 'in', ['sale', 'done']]]
+            fields = ['product_id', 'product_uom_qty', 'price_subtotal', 'create_date']
             
-        return df_stock
-
-    def get_sales_history(self):
-        """Histórico de ventas para calcular demanda"""
-        # Ventas confirmadas o realizadas
-        domain = [['state', 'in', ['sale', 'done']]] 
-        fields = ['product_id', 'product_uom_qty', 'price_subtotal', 'date_order']
-        # Consultamos líneas de venta (detalle)
-        df_sales = self.get_data('sale.order.line', fields, domain, limit=1500)
-        
-        if not df_sales.empty:
-            df_sales['product_name'] = df_sales['product_id'].apply(lambda x: x[1] if x else 'N/A')
-            df_sales['date'] = pd.to_datetime(df_sales['date_order'])
-        
-        return df_sales
+            data = self.models.execute_kw(self.db, self.uid, self.password,
+                'sale.order.line', 'search_read', [domain], {'fields': fields, 'limit': 3000})
+            
+            if data:
+                df = pd.DataFrame(data)
+                
+                # --- LIMPIEZA CRÍTICA ---
+                df['product_name'] = df['product_id'].apply(lambda x: x[1] if isinstance(x, list) else 'N/A')
+                df['date'] = pd.to_datetime(df['create_date'])
+                
+                df['qty_sold'] = df['product_uom_qty'].fillna(0).astype(float)
+                df['revenue'] = df['price_subtotal'].fillna(0).astype(float)
+                
+                return df[['product_name', 'date', 'qty_sold', 'revenue']]
+            
+            return pd.DataFrame(columns=['product_name', 'date', 'qty_sold', 'revenue'])
+            
+        except Exception as e:
+            st.error(f"Error bajando ventas: {e}")
+            return pd.DataFrame()
