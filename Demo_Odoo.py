@@ -10,7 +10,6 @@ import base64
 from fpdf import FPDF
 
 # --- 1. CONFIGURACIÓN DE SEGURIDAD Y PÁGINA ---
-# Esta sección bloquea el menú de "View Source" nativo de Streamlit
 st.set_page_config(
     page_title="NEXUS PRO IA", 
     layout="wide", 
@@ -63,9 +62,10 @@ st.markdown("""
 
 # --- 3. MÓDULO DE CONEXIÓN Y DATOS ---
 
-# Intentamos importar el cliente Odoo. Si falla, activamos modo DEMO silenciosamente.
+# Intentamos importar el cliente Odoo.
 try:
     from odoo_client import OdooConnector
+    # Si la importación funciona, asumimos que podemos intentar conectar
     CONNECTION_ACTIVE = True
 except ImportError:
     CONNECTION_ACTIVE = False
@@ -112,7 +112,9 @@ def get_master_data():
     """
     if CONNECTION_ACTIVE:
         try:
+            # Instanciamos la clase que creamos en odoo_client.py
             connector = OdooConnector()
+            
             # 1. Traer datos crudos
             df_stock = connector.get_stock_data()
             df_sales = connector.get_sales_data()
@@ -136,7 +138,9 @@ def get_master_data():
             df_final = pd.merge(stock_gb, sales_gb, on='product_name', how='outer').fillna(0)
             
             # 4. Enriquecimiento de datos
-            df_final['category'] = 'General'
+            df_final['category'] = 'General' # En una versión futura podríamos traer la categoría real de Odoo
+            
+            # Calculo de costo unitario promedio
             df_final['cost_unit'] = np.where(df_final['quantity'] > 0, 
                                             df_final['value'] / df_final['quantity'], 
                                             0)
@@ -144,6 +148,8 @@ def get_master_data():
             return df_final, True
 
         except Exception as e:
+            # Si falla la conexión (credenciales mal, servidor caído), usamos Mock Data
+            print(f"Error en Master Data: {e}")
             return generate_mock_data(), False 
     else:
         return generate_mock_data(), False
@@ -314,6 +320,10 @@ with st.sidebar:
 # Carga de datos
 with st.spinner('🔄 Sincronizando con ERP y procesando algoritmos...'):
     raw_data, is_real = get_master_data()
+    # Si detectamos que estamos usando datos reales, forzamos el indicador
+    if is_real: 
+        CONNECTION_ACTIVE = True
+    
     df = process_business_logic(raw_data, dias_analisis)
 
 # KPIs Principales (Header)
