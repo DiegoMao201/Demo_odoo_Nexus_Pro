@@ -148,9 +148,8 @@ def get_master_data():
             return df_final, True
 
         except Exception as e:
-            # Si falla la conexión (credenciales mal, servidor caído), usamos Mock Data
-            print(f"Error en Master Data: {e}")
-            return generate_mock_data(), False 
+            st.error(f"❌ Error de conexión crítico con Odoo: {e}")
+            st.stop()
     else:
         return generate_mock_data(), False
 
