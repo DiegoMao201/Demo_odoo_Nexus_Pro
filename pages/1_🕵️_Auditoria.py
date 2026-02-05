@@ -164,3 +164,49 @@ if st.button("🔍 Listar todos los modelos y campos disponibles"):
             st.info("Puedes filtrar y buscar en la tabla para investigar cualquier modelo o campo.")
         except Exception as e:
             st.error(f"Error al consultar modelos y campos: {e}")
+
+st.header("🔎 Auditoría Profunda de Modelos Clave Odoo")
+
+# Modelos clave para tu BI
+modelos_clave = [
+    ('sale.order.line', 'Líneas de Venta'),
+    ('stock.quant', 'Stock por Ubicación'),
+    ('product.product', 'Productos'),
+    ('res.partner', 'Clientes/Proveedores'),
+    ('stock.location', 'Ubicaciones'),
+    ('stock.move', 'Movimientos de Stock'),
+    ('purchase.order', 'Órdenes de Compra'),
+    ('purchase.order.line', 'Líneas de Orden de Compra'),
+    ('product.category', 'Categorías de Producto'),
+]
+
+try:
+    from odoo_client import OdooConnector
+    connector = OdooConnector()
+    st.success(f"✅ Conectado exitosamente a la BD: **{connector.db}** como **{connector.username}**")
+except Exception as e:
+    st.error(f"❌ Error de conexión crítico con Odoo: {e}")
+    st.stop()
+
+for modelo, nombre in modelos_clave:
+    st.divider()
+    st.subheader(f"📦 Modelo: `{modelo}` ({nombre})")
+    try:
+        # Obtener todos los campos del modelo
+        all_fields = connector.models.execute_kw(
+            connector.db, connector.uid, connector.password,
+            modelo, 'fields_get', [], {'attributes': ['string', 'type']}
+        )
+        # Mostrar todos los campos en un DataFrame
+        campos = []
+        for campo, props in all_fields.items():
+            campos.append({
+                "Campo": campo,
+                "Descripción": props.get('string', ''),
+                "Tipo": props.get('type', '')
+            })
+        df_campos = pd.DataFrame(campos)
+        st.dataframe(df_campos, use_container_width=True)
+        st.info(f"Total de campos en `{modelo}`: {len(df_campos)}")
+    except Exception as e:
+        st.error(f"No se pudo auditar el modelo `{modelo}`: {e}")
