@@ -95,3 +95,28 @@ auditar_modelo('product.product', [
     'standard_price',
     'categ_id'
 ])
+
+# 4. Auditoría de STOCK LOCATION
+auditar_modelo('stock.location', [
+    'name', 'usage', 'company_id', 'location_id'
+])
+
+# 5. Auditoría de STOCK MOVE
+auditar_modelo('stock.move', [
+    'product_id', 'location_id', 'location_dest_id', 'state', 'quantity_done', 'date'
+])
+
+# 6. Auditoría de PURCHASE ORDER
+auditar_modelo('purchase.order', [
+    'name', 'partner_id', 'date_order', 'state', 'amount_total'
+])
+
+# 7. Auditoría de PURCHASE ORDER LINE
+auditar_modelo('purchase.order.line', [
+    'order_id', 'product_id', 'product_qty', 'price_unit', 'date_planned'
+])
+
+# 8. Auditoría de PRODUCT CATEGORY
+auditar_modelo('product.category', [
+    'name', 'parent_id'
+])
