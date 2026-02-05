@@ -39,13 +39,17 @@ def upload_odoo_data_to_postgres(pg_url):
     df_prod = pd.DataFrame(data_prod)
     if not df_prod.empty:
         df_prod['empresa_id'] = EMPRESA_ID
+        # Extrae solo el nombre de la categoría
+        df_prod['categoria'] = df_prod['categ_id'].apply(lambda x: x[1] if isinstance(x, list) and len(x) > 1 else None)
         df_prod.rename(columns={
             'name': 'nombre',
             'default_code': 'codigo_interno',
             'list_price': 'precio_venta',
             'standard_price': 'precio_costo',
-            'categ_id': 'categoria'
+            # 'categ_id': 'categoria'  # Ya lo transformaste arriba
         }, inplace=True)
+        # Elimina la columna categ_id original para evitar problemas
+        df_prod.drop(columns=['categ_id'], inplace=True)
         df_prod.to_sql('producto', engine, if_exists='replace', index=False)
 
     # CLIENTES
