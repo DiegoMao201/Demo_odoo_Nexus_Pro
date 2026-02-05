@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 import urllib.parse
 import base64
 from fpdf import FPDF
-from Demo_odoo_Nexus_Pro.utils_data import upload_odoo_data_to_postgres
+from utils_data import upload_odoo_data_to_postgres
 from sqlalchemy import create_engine
 
 # --- 1. CONFIGURACIÓN DE SEGURIDAD Y PÁGINA ---
