@@ -120,3 +120,47 @@ auditar_modelo('purchase.order.line', [
 auditar_modelo('product.category', [
     'name', 'parent_id'
 ])
+
+st.header("📚 Explorador de Modelos y Campos Odoo")
+
+if st.button("🔍 Listar todos los modelos y campos disponibles"):
+    with st.spinner("Consultando modelos y campos, esto puede tardar unos segundos..."):
+        try:
+            # 1. Obtener todos los modelos
+            ir_model_data = connector.models.execute_kw(
+                connector.db, connector.uid, connector.password,
+                'ir.model', 'search_read', [[]], {'fields': ['model', 'name'], 'limit': 2000}
+            )
+            modelos = sorted(ir_model_data, key=lambda x: x['model'])
+            st.success(f"Se encontraron {len(modelos)} modelos en Odoo.")
+
+            # 2. Para cada modelo, obtener los campos
+            resumen = []
+            for modelo in modelos:
+                try:
+                    fields = connector.models.execute_kw(
+                        connector.db, connector.uid, connector.password,
+                        modelo['model'], 'fields_get', [], {'attributes': ['string', 'type']}
+                    )
+                    for campo, props in fields.items():
+                        resumen.append({
+                            "Modelo": modelo['model'],
+                            "Nombre Modelo": modelo['name'],
+                            "Campo": campo,
+                            "Descripción": props.get('string', ''),
+                            "Tipo": props.get('type', '')
+                        })
+                except Exception as e:
+                    resumen.append({
+                        "Modelo": modelo['model'],
+                        "Nombre Modelo": modelo['name'],
+                        "Campo": "ERROR",
+                        "Descripción": f"Error: {e}",
+                        "Tipo": ""
+                    })
+
+            df_resumen = pd.DataFrame(resumen)
+            st.dataframe(df_resumen, use_container_width=True)
+            st.info("Puedes filtrar y buscar en la tabla para investigar cualquier modelo o campo.")
+        except Exception as e:
+            st.error(f"Error al consultar modelos y campos: {e}")
