@@ -169,7 +169,7 @@ def process_business_logic(df_raw, days_analyzed):
     })
     
     # B. Cálculos Financieros Avanzados
-    df['Venta_Diaria'] = df['Rotacion_Unidades'] / days_analisis
+    df['Venta_Diaria'] = df['Rotacion_Unidades'] / dias_analisis
     
     # Cobertura (Días de Inventario)
     df['Dias_Cobertura'] = df['Stock_Fisico'] / df['Venta_Diaria'].replace(0, 0.001)
