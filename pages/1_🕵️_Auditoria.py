@@ -192,12 +192,11 @@ for modelo, nombre in modelos_clave:
     st.divider()
     st.subheader(f"📦 Modelo: `{modelo}` ({nombre})")
     try:
-        # Obtener todos los campos del modelo
+        # Mostrar todos los campos
         all_fields = connector.models.execute_kw(
             connector.db, connector.uid, connector.password,
             modelo, 'fields_get', [], {'attributes': ['string', 'type']}
         )
-        # Mostrar todos los campos en un DataFrame
         campos = []
         for campo, props in all_fields.items():
             campos.append({
@@ -208,5 +207,22 @@ for modelo, nombre in modelos_clave:
         df_campos = pd.DataFrame(campos)
         st.dataframe(df_campos, use_container_width=True)
         st.info(f"Total de campos en `{modelo}`: {len(df_campos)}")
+
+        # --- NUEVO BLOQUE: Muestra de datos reales ---
+        st.markdown("**📊 Muestra de Datos Reales:**")
+        try:
+            # Trae hasta 10 registros y todos los campos
+            data = connector.models.execute_kw(
+                connector.db, connector.uid, connector.password,
+                modelo, 'search_read', [[]], {'fields': list(all_fields.keys()), 'limit': 10}
+            )
+            if data:
+                df_data = pd.DataFrame(data)
+                st.dataframe(df_data, use_container_width=True)
+            else:
+                st.warning("La tabla está vacía (0 registros).")
+        except Exception as e:
+            st.error(f"Error al leer datos reales: {e}")
+
     except Exception as e:
         st.error(f"No se pudo auditar el modelo `{modelo}`: {e}")
