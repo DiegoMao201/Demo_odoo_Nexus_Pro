@@ -8,6 +8,8 @@ from datetime import datetime, timedelta
 import urllib.parse
 import base64
 from fpdf import FPDF
+from utils_data import upload_odoo_data_to_postgres
+from sqlalchemy import create_engine
 
 # --- 1. CONFIGURACIÓN DE SEGURIDAD Y PÁGINA ---
 st.set_page_config(
@@ -167,7 +169,7 @@ def process_business_logic(df_raw, days_analyzed):
     })
     
     # B. Cálculos Financieros Avanzados
-    df['Venta_Diaria'] = df['Rotacion_Unidades'] / days_analyzed
+    df['Venta_Diaria'] = df['Rotacion_Unidades'] / days_analisis
     
     # Cobertura (Días de Inventario)
     df['Dias_Cobertura'] = df['Stock_Fisico'] / df['Venta_Diaria'].replace(0, 0.001)
@@ -313,6 +315,18 @@ with st.sidebar:
         st.success("🟢 Conectado a Odoo ERP")
     else:
         st.warning("⚠️ Modo DEMO (Datos Simulados)")
+
+st.sidebar.markdown("---")
+if st.sidebar.button("🔄 Cargar y Actualizar Datos desde Odoo"):
+    with st.spinner("Cargando y actualizando datos desde Odoo..."):
+        # Construye la URL de conexión igual que en utils_data.py
+        import os
+        pg_url = (
+            f"postgresql://{os.getenv('PG_USER')}:{os.getenv('PG_PASSWORD')}"
+            f"@{os.getenv('PG_HOST')}:{os.getenv('PG_PORT')}/{os.getenv('PG_DB')}"
+        )
+        upload_odoo_data_to_postgres(pg_url)
+        st.success("¡Datos actualizados correctamente desde Odoo!")
 
 # --- 7. LÓGICA DE EJECUCIÓN UI ---
 
@@ -506,3 +520,25 @@ with tab5:
         """, unsafe_allow_html=True)
 
 st.caption("NEXUS PRO IA System v3.0 | Powered by Python & Streamlit")
+
+# --- 8. KPIs POSTGRES ---
+def get_pg_engine():
+    import os
+    pg_url = (
+        f"postgresql://{os.getenv('PG_USER')}:{os.getenv('PG_PASSWORD')}"
+        f"@{os.getenv('PG_HOST')}:{os.getenv('PG_PORT')}/{os.getenv('PG_DB')}"
+    )
+    return create_engine(pg_url)
+
+def kpis_postgres():
+    engine = get_pg_engine()
+    # Productos diferentes
+    productos = pd.read_sql("SELECT COUNT(DISTINCT nombre) FROM producto WHERE empresa_id=1", engine).iloc[0,0]
+    # Ventas totales
+    ventas = pd.read_sql("SELECT COUNT(*) FROM venta_linea WHERE empresa_id=1", engine).iloc[0,0]
+    # Clientes diferentes
+    clientes = pd.read_sql("SELECT COUNT(DISTINCT nombre) FROM cliente WHERE empresa_id=1", engine).iloc[0,0]
+    return productos, ventas, clientes
+
+productos, ventas, clientes = kpis_postgres()
+st.info(f"**Productos diferentes:** {productos} | **Ventas totales:** {ventas} | **Clientes diferentes:** {clientes}")
