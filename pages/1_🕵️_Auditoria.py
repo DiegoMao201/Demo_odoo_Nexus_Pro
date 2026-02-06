@@ -325,9 +325,17 @@ try:
         st.warning("No se obtuvo DataFrame de productos.")
 
     st.subheader("Ubicaciones (DataFrame crudo)")
-    st.dataframe(df_location.head(10))
-    st.write("Shape:", df_location.shape)
-    st.write("Columnas:", df_location.columns.tolist())
+    try:
+        # Normaliza company_id para mostrar solo el nombre
+        if 'company_id' in df_location.columns:
+            df_location['company_id_nombre'] = df_location['company_id'].apply(
+                lambda x: x[1] if isinstance(x, list) and len(x) > 1 else (x if isinstance(x, str) else None)
+            )
+        st.dataframe(df_location.head(10))
+        st.write("Shape:", df_location.shape)
+        st.write("Columnas:", df_location.columns.tolist())
+    except Exception as e:
+        st.error(f"Error al extraer DataFrame de ubicaciones: {e}")
 
     st.subheader("Movimientos de Stock (DataFrame crudo)")
     st.dataframe(df_moves.head(10))
