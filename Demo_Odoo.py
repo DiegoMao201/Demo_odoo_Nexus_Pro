@@ -162,25 +162,78 @@ def get_master_data():
 
 # --- 4. MOTOR DE INTELIGENCIA DE NEGOCIOS (BI ENGINE) ---
 
-def process_business_logic(df_stock, df_sales, df_product, df_location, df_moves, df_clients, df_purchases, days_analyzed):
-    # Merge stock y producto
+def process_business_logic(
+    df_stock, df_sales, df_product, df_location, df_moves, df_clients, df_purchases, days_analyzed
+):
+    # --- 1. Enriquecimiento de stock ---
     df_stock = df_stock.merge(df_product, left_on='product_id', right_on='id', suffixes=('_stock', '_prod'))
-    # Merge ventas y producto
+    df_stock = df_stock.merge(df_location, left_on='location_id', right_on='id', suffixes=('', '_loc'))
+    df_stock['cost_unit'] = df_stock['standard_price']
+    df_stock['capital_inmovilizado'] = df_stock['quantity'] * df_stock['cost_unit']
+
+    # --- 2. Ventas por producto y tienda ---
     df_sales = df_sales.merge(df_product, left_on='product_id', right_on='id', suffixes=('_sale', '_prod'))
-    # KPIs por producto
-    kpi = df_sales.groupby('product_name').agg({
-        'qty_sold': 'sum',
-        'revenue': 'sum'
-    }).reset_index()
-    stock_kpi = df_stock.groupby('product_name').agg({
-        'quantity': 'sum',
-        'value': 'sum'
-    }).reset_index()
-    df_final = pd.merge(kpi, stock_kpi, on='product_name', how='outer').fillna(0)
-    # Calcula rotación, cobertura, etc.
-    df_final['rotacion'] = df_final['qty_sold'] / df_final['quantity'].replace(0, np.nan)
-    # ...más cálculos...
-    return df_final
+    df_sales = df_sales.merge(df_location, left_on='order_id', right_on='id', how='left', suffixes=('', '_loc'))  # Ajusta si tienes tienda en order_id
+
+    # --- 3. KPIs por producto y tienda ---
+    ventas_gb = df_sales.groupby(['product_id', 'product_name', 'location_id']) \
+        .agg({'qty_sold': 'sum', 'revenue': 'sum'}).reset_index()
+    stock_gb = df_stock.groupby(['product_id', 'product_name', 'location_id', 'name']) \
+        .agg({'quantity': 'sum', 'capital_inmovilizado': 'sum', 'cost_unit': 'mean'}).reset_index()
+
+    # --- 4. Merge final ---
+    df_final = pd.merge(stock_gb, ventas_gb, on=['product_id', 'product_name', 'location_id'], how='outer').fillna(0)
+
+    # --- 5. Cálculos de rotación y cobertura ---
+    df_final['rotacion'] = df_final['qty_sold'] / days_analisis
+    df_final['cobertura_dias'] = df_final['quantity'] / df_final['rotacion'].replace(0, np.nan)
+    df_final['cobertura_dias'] = df_final['cobertura_dias'].replace([np.inf, -np.inf], 0).fillna(0)
+
+    # --- 6. Diagnóstico IA ---
+    def diagnostico(row):
+        if row['quantity'] == 0 and row['qty_sold'] > 0:
+            return "URGENTE COMPRAR"
+        elif row['cobertura_dias'] > 180:
+            return "LIQUIDAR"
+        elif row['rotacion'] > 0 and row['cobertura_dias'] < 15:
+            return "REVISAR STOCK"
+        else:
+            return "SALUDABLE"
+    df_final['diagnostico'] = df_final.apply(diagnostico, axis=1)
+
+    # --- 7. Sugerencias de traslado ---
+    # Ejemplo: productos con exceso en una tienda y quiebre en otra
+    traslados = []
+    for prod in df_final['product_id'].unique():
+        prod_data = df_final[df_final['product_id'] == prod]
+        exceso = prod_data[prod_data['cobertura_dias'] > 90]
+        quiebre = prod_data[prod_data['cobertura_dias'] < 10]
+        for _, row_exceso in exceso.iterrows():
+            for _, row_quiebre in quiebre.iterrows():
+                traslados.append({
+                    'producto': row_exceso['product_name'],
+                    'de': row_exceso['name'],
+                    'a': row_quiebre['name'],
+                    'cantidad_sugerida': min(row_exceso['quantity'] - 30, 30 - row_quiebre['quantity'])
+                })
+    df_traslados = pd.DataFrame(traslados)
+
+    # --- 8. Sugerencias de compra ---
+    compras = df_final[(df_final['diagnostico'] == "URGENTE COMPRAR")][
+        ['product_name', 'name', 'qty_sold', 'quantity', 'cost_unit']
+    ]
+    compras['cantidad_sugerida'] = (compras['qty_sold'] / days_analisis * 30 - compras['quantity']).clip(lower=0)
+
+    # --- 9. Capital inmovilizado total ---
+    capital_inmovilizado = df_final['capital_inmovilizado'].sum()
+
+    # --- 10. Devuelve todo lo necesario para el dashboard ---
+    return {
+        'kpi': df_final,
+        'traslados': df_traslados,
+        'compras': compras,
+        'capital_inmovilizado': capital_inmovilizado
+    }
 
 # --- 5. CLASE GENERADOR PDF ---
 class PDFReport(FPDF):
@@ -283,22 +336,25 @@ if st.sidebar.button("🔄 Cargar y Actualizar Datos desde Odoo"):
 # --- 7. LÓGICA DE EJECUCIÓN UI ---
 
 # Carga de datos
-with st.spinner('🔄 Sincronizando con ERP y procesando algoritmos...'):
-    raw_data, is_real = get_master_data()
-    # Si detectamos que estamos usando datos reales, forzamos el indicador
-    if is_real: 
-        CONNECTION_ACTIVE = True
-    
-    df = process_business_logic(
-        raw_data['stock'], raw_data['sales'], raw_data['product'],
-        raw_data['location'], raw_data['moves'], raw_data['clients'],
-        raw_data['purchases'], dias_analisis
-    )
+raw_data, is_real = get_master_data()
+bi = process_business_logic(
+    raw_data['stock'], raw_data['sales'], raw_data['product'],
+    raw_data['location'], raw_data['moves'], raw_data['clients'],
+    raw_data['purchases'], dias_analisis
+)
 
-# KPIs
-st.metric("Ingresos Totales", f"${df['Ventas_Totales'].sum():,.0f}")
-st.metric("Capital Invertido", f"${df['Capital_Invertido'].sum():,.0f}")
-st.metric("GMROI (Eficiencia)", f"{df['GMROI'].mean():.2f}x", delta="Retorno x $ Invertido")
-st.metric("Salud de Inventario", f"{len(df[df['Diagnostico_IA'] == "✅ SALUDABLE"]) / len(df) * 100:.1f}%", delta="Referencias Sanas")
+# KPIs principales
+st.metric("Capital Inmovilizado", f"${bi['capital_inmovilizado']:,.0f}")
+st.dataframe(bi['kpi'].head(20))
 
-# Dashboard visual (sunburst, tablas, alertas, etc.)
+# Sugerencias de traslado
+st.subheader("🚚 Traslados sugeridos entre tiendas")
+st.dataframe(bi['traslados'])
+
+# Sugerencias de compra
+st.subheader("🛒 Compras sugeridas")
+st.dataframe(bi['compras'])
+
+# Diagnóstico IA
+st.subheader("🔎 Diagnóstico de Inventario")
+st.dataframe(bi['kpi'][['product_name', 'name', 'diagnostico', 'quantity', 'qty_sold', 'cobertura_dias']])
