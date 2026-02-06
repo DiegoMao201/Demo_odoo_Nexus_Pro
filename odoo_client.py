@@ -50,8 +50,13 @@ class OdooConnector:
         data = self.models.execute_kw(self.db, self.uid, self.password, 'product.product', 'search_read', [[]], {'fields': fields, 'limit': 10000})
         df = pd.DataFrame(data)
         if not df.empty:
-            df['category_id'] = df['categ_id'].apply(lambda x: x[0] if isinstance(x, list) else x)
-            df['category_name'] = df['categ_id'].apply(lambda x: x[1] if isinstance(x, list) and len(x) > 1 else None)
+            # Solo procesa categ_id si es lista (many2one)
+            if df['categ_id'].apply(lambda x: isinstance(x, list)).any():
+                df['category_id'] = df['categ_id'].apply(lambda x: x[0] if isinstance(x, list) else None)
+                df['category_name'] = df['categ_id'].apply(lambda x: x[1] if isinstance(x, list) and len(x) > 1 else x)
+            else:
+                df['category_id'] = None
+                df['category_name'] = df['categ_id']
         return df
 
     def get_sales_data(self):

@@ -155,16 +155,13 @@ def process_business_logic(
         df_sales['warehouse_id'] = np.nan
         df_sales['warehouse_name'] = np.nan
 
-    ventas_gb = df_sales.groupby(['product_id', 'product_name', 'warehouse_id', 'warehouse_name']) \
-        .agg({'qty_sold': 'sum', 'revenue': 'sum'}).reset_index()
-    stock_gb = df_stock.groupby(['product_id', 'product_name', 'location_id', 'name']) \
-        .agg({'quantity': 'sum', 'capital_inmovilizado': 'sum', 'cost_unit': 'mean'}).reset_index()
+    ventas_gb = df_sales.groupby(['product_id', 'product_name']).agg({'qty_sold': 'sum', 'revenue': 'sum'}).reset_index()
+    stock_gb = df_stock.groupby(['product_id', 'product_name']).agg({'quantity': 'sum', 'capital_inmovilizado': 'sum', 'cost_unit': 'mean'}).reset_index()
 
     df_final = pd.merge(
         stock_gb,
         ventas_gb,
-        left_on=['product_id', 'product_name', 'location_id'],
-        right_on=['product_id', 'product_name', 'warehouse_id'],
+        on=['product_id', 'product_name'],
         how='outer'
     ).fillna(0)
 
@@ -195,15 +192,15 @@ def process_business_logic(
             for _, row_quiebre in quiebre.iterrows():
                 traslados.append({
                     'producto': row_exceso['product_name'],
-                    'de': row_exceso['name'],
-                    'a': row_quiebre['name'],
+                    'de': row_exceso.get('name', ''),
+                    'a': row_quiebre.get('name', ''),
                     'cantidad_sugerida': min(row_exceso['quantity'] - 30, 30 - row_quiebre['quantity'])
                 })
     df_traslados = pd.DataFrame(traslados)
 
     # --- 8. Sugerencias de compra ---
     compras = df_final[(df_final['diagnostico'] == "URGENTE COMPRAR")][
-        ['product_name', 'name', 'qty_sold', 'quantity', 'cost_unit']
+        ['product_name', 'quantity', 'qty_sold', 'cost_unit']
     ]
     compras['cantidad_sugerida'] = (compras['qty_sold'] / dias_analisis * 30 - compras['quantity']).clip(lower=0)
 
