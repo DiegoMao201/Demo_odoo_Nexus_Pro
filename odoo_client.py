@@ -57,8 +57,12 @@ class OdooConnector:
         return df
 
     def get_sales_data(self):
+        fields = [
+            'id', 'order_id', 'product_id', 'product_uom_qty', 'qty_delivered',
+            'price_unit', 'price_subtotal', 'create_date', 'state', 'warehouse_id',
+            'qty_invoiced', 'qty_to_invoice'
+        ]
         domain = [['state', 'in', ['sale', 'done']]]
-        fields = ['product_id', 'product_uom_qty', 'price_subtotal', 'create_date', 'order_id', 'state']
         data = self.models.execute_kw(self.db, self.uid, self.password, 'sale.order.line', 'search_read', [domain], {'fields': fields, 'limit': 10000})
         df = pd.DataFrame(data)
         if not df.empty:
@@ -66,6 +70,8 @@ class OdooConnector:
             df['product_name'] = df['product_id'].apply(lambda x: x[1] if isinstance(x, list) and len(x) > 1 else None)
             df['order_id'] = df['order_id'].apply(lambda x: x[0] if isinstance(x, list) else x)
             df['order_name'] = df['order_id'].apply(lambda x: x[1] if isinstance(x, list) and len(x) > 1 else None)
+            df['warehouse_id'] = df['warehouse_id'].apply(lambda x: x[0] if isinstance(x, list) else x) if 'warehouse_id' in df else None
+            df['warehouse_name'] = df['warehouse_id'].apply(lambda x: x[1] if isinstance(x, list) and len(x) > 1 else None) if 'warehouse_id' in df else None
             df['qty_sold'] = pd.to_numeric(df['product_uom_qty'], errors='coerce').fillna(0)
             df['revenue'] = pd.to_numeric(df['price_subtotal'], errors='coerce').fillna(0)
             df['date'] = pd.to_datetime(df['create_date'])

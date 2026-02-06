@@ -140,7 +140,7 @@ def get_master_data():
 # --- 4. MOTOR DE INTELIGENCIA DE NEGOCIOS (BI ENGINE) ---
 
 def process_business_logic(
-    df_stock, df_sales, df_product, df_location, df_moves, df_clients, df_purchases, dias_analyzed
+    df_stock, df_sales, df_product, df_location, df_moves, df_clients, df_purchases, dias_analisis
 ):
     # --- 1. Enriquecimiento de stock ---
     df_stock = df_stock.merge(df_product, left_on='product_id', right_on='id', suffixes=('_stock', '_prod'))
@@ -148,18 +148,30 @@ def process_business_logic(
     df_stock['cost_unit'] = df_stock['standard_price']
     df_stock['capital_inmovilizado'] = df_stock['quantity'] * df_stock['cost_unit']
 
-    # --- 2. Ventas por producto y tienda ---
+    # --- 2. Ventas por producto y almacén ---
     df_sales = df_sales.merge(df_product, left_on='product_id', right_on='id', suffixes=('_sale', '_prod'))
-    df_sales = df_sales.merge(df_location, left_on='order_id', right_on='id', how='left', suffixes=('', '_loc'))  # Ajusta si tienes tienda en order_id
+    # Extrae warehouse_id y warehouse_name si existen
+    if 'warehouse_id' in df_sales.columns:
+        df_sales['warehouse_id'] = df_sales['warehouse_id'].apply(lambda x: x[0] if isinstance(x, list) else x)
+        df_sales['warehouse_name'] = df_sales['warehouse_id'].apply(lambda x: x[1] if isinstance(x, list) and len(x) > 1 else None)
+    else:
+        df_sales['warehouse_id'] = np.nan
+        df_sales['warehouse_name'] = np.nan
 
-    # --- 3. KPIs por producto y tienda ---
-    ventas_gb = df_sales.groupby(['product_id', 'product_name', 'location_id']) \
+    # --- 3. KPIs por producto y almacén ---
+    ventas_gb = df_sales.groupby(['product_id', 'product_name', 'warehouse_id', 'warehouse_name']) \
         .agg({'qty_sold': 'sum', 'revenue': 'sum'}).reset_index()
     stock_gb = df_stock.groupby(['product_id', 'product_name', 'location_id', 'name']) \
         .agg({'quantity': 'sum', 'capital_inmovilizado': 'sum', 'cost_unit': 'mean'}).reset_index()
 
-    # --- 4. Merge final ---
-    df_final = pd.merge(stock_gb, ventas_gb, on=['product_id', 'product_name', 'location_id'], how='outer').fillna(0)
+    # --- 4. Merge final por almacén/ubicación ---
+    df_final = pd.merge(
+        stock_gb,
+        ventas_gb,
+        left_on=['product_id', 'product_name', 'location_id'],
+        right_on=['product_id', 'product_name', 'warehouse_id'],
+        how='outer'
+    ).fillna(0)
 
     # --- 5. Cálculos de rotación y cobertura ---
     df_final['rotacion'] = df_final['qty_sold'] / dias_analisis
@@ -179,7 +191,6 @@ def process_business_logic(
     df_final['diagnostico'] = df_final.apply(diagnostico, axis=1)
 
     # --- 7. Sugerencias de traslado ---
-    # Ejemplo: productos con exceso en una tienda y quiebre en otra
     traslados = []
     for prod in df_final['product_id'].unique():
         prod_data = df_final[df_final['product_id'] == prod]
