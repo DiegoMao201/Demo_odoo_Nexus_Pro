@@ -142,15 +142,12 @@ def get_master_data():
 def process_business_logic(
     df_stock, df_sales, df_product, df_location, df_moves, df_clients, df_purchases, dias_analisis
 ):
-    # --- 1. Enriquecimiento de stock ---
-    df_stock = df_stock.merge(df_product, left_on='product_id', right_on='id', suffixes=('_stock', '_prod'))
-    df_stock = df_stock.merge(df_location, left_on='location_id', right_on='id', suffixes=('', '_loc'))
+    df_stock = df_stock.merge(df_product, left_on='product_id', right_on='id', suffixes=('_stock', '_prod'), how='left')
+    df_stock = df_stock.merge(df_location, left_on='location_id', right_on='id', suffixes=('', '_loc'), how='left')
     df_stock['cost_unit'] = df_stock['standard_price']
     df_stock['capital_inmovilizado'] = df_stock['quantity'] * df_stock['cost_unit']
 
-    # --- 2. Ventas por producto y almacén ---
-    df_sales = df_sales.merge(df_product, left_on='product_id', right_on='id', suffixes=('_sale', '_prod'))
-    # Extrae warehouse_id y warehouse_name si existen
+    df_sales = df_sales.merge(df_product, left_on='product_id', right_on='id', suffixes=('_sale', '_prod'), how='left')
     if 'warehouse_id' in df_sales.columns:
         df_sales['warehouse_id'] = df_sales['warehouse_id'].apply(lambda x: x[0] if isinstance(x, list) else x)
         df_sales['warehouse_name'] = df_sales['warehouse_id'].apply(lambda x: x[1] if isinstance(x, list) and len(x) > 1 else None)
@@ -158,13 +155,11 @@ def process_business_logic(
         df_sales['warehouse_id'] = np.nan
         df_sales['warehouse_name'] = np.nan
 
-    # --- 3. KPIs por producto y almacén ---
     ventas_gb = df_sales.groupby(['product_id', 'product_name', 'warehouse_id', 'warehouse_name']) \
         .agg({'qty_sold': 'sum', 'revenue': 'sum'}).reset_index()
     stock_gb = df_stock.groupby(['product_id', 'product_name', 'location_id', 'name']) \
         .agg({'quantity': 'sum', 'capital_inmovilizado': 'sum', 'cost_unit': 'mean'}).reset_index()
 
-    # --- 4. Merge final por almacén/ubicación ---
     df_final = pd.merge(
         stock_gb,
         ventas_gb,
@@ -341,3 +336,7 @@ else:
     st.dataframe(bi['compras'])
     st.subheader("🔎 Diagnóstico de Inventario")
     st.dataframe(bi['kpi'][['product_name', 'name', 'diagnostico', 'quantity', 'qty_sold', 'cobertura_dias']])
+
+# En el dashboard, para filtrar ventas por estado:
+estado = st.selectbox("Filtrar ventas por estado", df_sales['state'].unique())
+df_sales_filtrado = df_sales[df_sales['state'] == estado]
