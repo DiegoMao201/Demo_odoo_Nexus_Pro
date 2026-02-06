@@ -308,9 +308,21 @@ try:
     st.write("Columnas:", df_sales.columns.tolist())
 
     st.subheader("Productos (DataFrame crudo)")
-    st.dataframe(df_product.head(10))
-    st.write("Shape:", df_product.shape)
-    st.write("Columnas:", df_product.columns.tolist())
+    # Asegura que la columna de categoría sea segura para mostrar
+    if isinstance(df_product, pd.DataFrame):
+        if 'categ_id_nombre' in df_product.columns:
+            # ya normalizada por OdooConnector.get_product_data
+            df_product_display = df_product.copy()
+        else:
+            # fallback: intenta convertir values variados a string para evitar inferencias de tipo
+            df_product_display = df_product.copy()
+            for col in df_product_display.columns:
+                df_product_display[col] = df_product_display[col].apply(lambda x: x[1] if isinstance(x, list) and len(x) > 1 else (str(x) if x is not None else None))
+        st.dataframe(df_product_display.head(10))
+        st.write("Shape:", df_product.shape)
+        st.write("Columnas:", df_product.columns.tolist())
+    else:
+        st.warning("No se obtuvo DataFrame de productos.")
 
     st.subheader("Ubicaciones (DataFrame crudo)")
     st.dataframe(df_location.head(10))

@@ -50,23 +50,17 @@ class OdooConnector:
         data = self.models.execute_kw(self.db, self.uid, self.password, 'product.product', 'search_read', [[]], {'fields': fields, 'limit': 10000})
         df = pd.DataFrame(data)
         if not df.empty:
-            # Procesa categ_id robustamente
-            def extract_categ_id(x):
-                if isinstance(x, list):
-                    return x[0]
-                elif isinstance(x, int):
-                    return x
-                else:
-                    return None
+            # Extrae nombre de categoría de forma robusta y elimina la columna original para evitar inferencias problemáticas
             def extract_categ_name(x):
                 if isinstance(x, list) and len(x) > 1:
                     return x[1]
-                elif isinstance(x, str):
-                    return x
-                else:
-                    return None
-            df['category_id'] = df['categ_id'].apply(extract_categ_id)
-            df['category_name'] = df['categ_id'].apply(extract_categ_name)
+                if isinstance(x, (str, int, float)):
+                    return str(x)
+                return None
+            if 'categ_id' in df.columns:
+                df['categ_id_nombre'] = df['categ_id'].apply(extract_categ_name)
+                # elimina la columna original para evitar que pandas intente convertir tipos mixtos
+                df.drop(columns=['categ_id'], inplace=True, errors='ignore')
         return df
 
     def get_sales_data(self):
