@@ -226,3 +226,18 @@ for modelo, nombre in modelos_clave:
 
     except Exception as e:
         st.error(f"No se pudo auditar el modelo `{modelo}`: {e}")
+
+st.header("🔬 Diagnóstico de Stock y Ventas")
+
+df_stock = connector.get_stock_data()
+df_sales = connector.get_sales_data()
+
+st.subheader("Stock (primeros 10 registros)")
+st.dataframe(df_stock.head(10))
+st.write("Total productos con stock:", df_stock['product_name'].nunique())
+st.write("Suma total de stock:", df_stock['quantity'].sum())
+
+st.subheader("Ventas (primeros 10 registros)")
+st.dataframe(df_sales.head(10))
+st.write("Total productos con ventas:", df_sales['product_name'].nunique())
+st.write("Suma total de ventas:", df_sales['qty_sold'].sum())
