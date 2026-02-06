@@ -218,6 +218,10 @@ for modelo, nombre in modelos_clave:
             )
             if data:
                 df_data = pd.DataFrame(data)
+                # Procesa campos Many2one: si es lista, muestra solo el nombre
+                for col in df_data.columns:
+                    if df_data[col].apply(lambda x: isinstance(x, list)).any():
+                        df_data[col] = df_data[col].apply(lambda x: x[1] if isinstance(x, list) and len(x) > 1 else x)
                 st.dataframe(df_data, use_container_width=True)
             else:
                 st.warning("La tabla está vacía (0 registros).")
