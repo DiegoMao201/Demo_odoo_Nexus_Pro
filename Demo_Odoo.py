@@ -114,56 +114,33 @@ def get_master_data():
     """
     if CONNECTION_ACTIVE:
         try:
-            # Instanciamos la clase que creamos en odoo_client.py
             connector = OdooConnector()
-            
-            # 1. Traer datos crudos
-            df_stock = connector.get_stock_data()
-            df_product = connector.get_product_data()
-            df_sales = connector.get_sales_data()
-            df_location = connector.get_location_data()
-            df_moves = connector.get_stock_move_data()
-            df_clients = connector.get_partner_data()
-            df_purchases = connector.get_purchase_order_line_data()
 
-            # Verificación de datos vacíos
-            if df_stock.empty and df_sales.empty:
-                return generate_mock_data(), False
+            raw_data = {
+                'stock'     : connector.get_stock_data(),
+                'product'   : connector.get_product_data(),
+                'sales'     : connector.get_sales_data(),
+                'location'  : connector.get_location_data(),
+                'moves'     : connector.get_stock_move_data(),
+                'clients'   : connector.get_partner_data(),
+                'purchases' : connector.get_purchase_order_line_data(),
+            }
 
-            # 2. Agrupación segura
-            stock_gb = df_stock.groupby('product_name').agg({
-                'quantity': 'sum', 
-                'value': 'sum'
-            }).reset_index()
-
-            sales_gb = df_sales.groupby('product_name').agg({
-                'qty_sold': 'sum', 
-                'revenue': 'sum'
-            }).reset_index()
-
-            # 3. MERGE (Fusión) OUTER JOIN
-            df_final = pd.merge(stock_gb, sales_gb, on='product_name', how='outer').fillna(0)
-            
-            # 4. Enriquecimiento de datos
-            df_final['category'] = 'General' # En una versión futura podríamos traer la categoría real de Odoo
-            
-            # Calculo de costo unitario promedio
-            df_final['cost_unit'] = np.where(df_final['quantity'] > 0, 
-                                            df_final['value'] / df_final['quantity'], 
-                                            0)
-            
-            return df_final, True
+            # Si todo viene vacío, usar mock
+            if all(df.empty for df in raw_data.values()):
+                return {'mock': generate_mock_data()}, False
+            return raw_data, True
 
         except Exception as e:
             st.error(f"❌ Error de conexión crítico con Odoo: {e}")
             st.stop()
     else:
-        return generate_mock_data(), False
+        return {'mock': generate_mock_data()}, False
 
 # --- 4. MOTOR DE INTELIGENCIA DE NEGOCIOS (BI ENGINE) ---
 
 def process_business_logic(
-    df_stock, df_sales, df_product, df_location, df_moves, df_clients, df_purchases, days_analyzed
+    df_stock, df_sales, df_product, df_location, df_moves, df_clients, df_purchases, dias_analyzed
 ):
     # --- 1. Enriquecimiento de stock ---
     df_stock = df_stock.merge(df_product, left_on='product_id', right_on='id', suffixes=('_stock', '_prod'))
@@ -185,7 +162,7 @@ def process_business_logic(
     df_final = pd.merge(stock_gb, ventas_gb, on=['product_id', 'product_name', 'location_id'], how='outer').fillna(0)
 
     # --- 5. Cálculos de rotación y cobertura ---
-    df_final['rotacion'] = df_final['qty_sold'] / days_analisis
+    df_final['rotacion'] = df_final['qty_sold'] / dias_analisis
     df_final['cobertura_dias'] = df_final['quantity'] / df_final['rotacion'].replace(0, np.nan)
     df_final['cobertura_dias'] = df_final['cobertura_dias'].replace([np.inf, -np.inf], 0).fillna(0)
 
@@ -222,7 +199,7 @@ def process_business_logic(
     compras = df_final[(df_final['diagnostico'] == "URGENTE COMPRAR")][
         ['product_name', 'name', 'qty_sold', 'quantity', 'cost_unit']
     ]
-    compras['cantidad_sugerida'] = (compras['qty_sold'] / days_analisis * 30 - compras['quantity']).clip(lower=0)
+    compras['cantidad_sugerida'] = (compras['qty_sold'] / dias_analisis * 30 - compras['quantity']).clip(lower=0)
 
     # --- 9. Capital inmovilizado total ---
     capital_inmovilizado = df_final['capital_inmovilizado'].sum()
