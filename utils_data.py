@@ -24,6 +24,8 @@ def upload_odoo_data_to_postgres(pg_url):
     # VENTAS
     df_sales = connector.get_sales_data()
     if not df_sales.empty:
+        # Extrae solo el ID de order_id si es lista
+        df_sales['order_id'] = df_sales['order_id'].apply(lambda x: x[0] if isinstance(x, list) else x)
         df_sales['empresa_id'] = EMPRESA_ID
         df_sales.rename(columns={
             'product_name': 'producto_nombre',
