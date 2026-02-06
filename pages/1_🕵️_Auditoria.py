@@ -284,3 +284,53 @@ if st.button("Exportar todos los modelos a ZIP (CSV por modelo)"):
             mime="application/zip"
         )
         st.success("¡Listo! Descarga el ZIP y descomprímelo para ver cada modelo en un CSV separado.")
+
+st.header("🔎 Diagnóstico directo de DataFrames para BI Engine")
+
+# Extrae los DataFrames usando el mismo método que el dashboard principal
+try:
+    df_stock = connector.get_stock_data()
+    df_sales = connector.get_sales_data()
+    df_product = connector.get_product_data()
+    df_location = connector.get_location_data()
+    df_moves = connector.get_stock_move_data()
+    df_clients = connector.get_partner_data()
+    df_purchases = connector.get_purchase_order_line_data()
+
+    st.subheader("Stock (DataFrame crudo)")
+    st.dataframe(df_stock.head(10))
+    st.write("Shape:", df_stock.shape)
+    st.write("Columnas:", df_stock.columns.tolist())
+
+    st.subheader("Ventas (DataFrame crudo)")
+    st.dataframe(df_sales.head(10))
+    st.write("Shape:", df_sales.shape)
+    st.write("Columnas:", df_sales.columns.tolist())
+
+    st.subheader("Productos (DataFrame crudo)")
+    st.dataframe(df_product.head(10))
+    st.write("Shape:", df_product.shape)
+    st.write("Columnas:", df_product.columns.tolist())
+
+    st.subheader("Ubicaciones (DataFrame crudo)")
+    st.dataframe(df_location.head(10))
+    st.write("Shape:", df_location.shape)
+    st.write("Columnas:", df_location.columns.tolist())
+
+    st.subheader("Movimientos de Stock (DataFrame crudo)")
+    st.dataframe(df_moves.head(10))
+    st.write("Shape:", df_moves.shape)
+    st.write("Columnas:", df_moves.columns.tolist())
+
+    st.subheader("Clientes (DataFrame crudo)")
+    st.dataframe(df_clients.head(10))
+    st.write("Shape:", df_clients.shape)
+    st.write("Columnas:", df_clients.columns.tolist())
+
+    st.subheader("Compras (DataFrame crudo)")
+    st.dataframe(df_purchases.head(10))
+    st.write("Shape:", df_purchases.shape)
+    st.write("Columnas:", df_purchases.columns.tolist())
+
+except Exception as e:
+    st.error(f"Error al extraer DataFrames crudos: {e}")

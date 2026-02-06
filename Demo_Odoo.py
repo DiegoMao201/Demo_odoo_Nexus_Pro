@@ -323,10 +323,19 @@ if not is_real and 'mock' in raw_data:
     st.warning("Modo DEMO: usando datos simulados.")
     st.dataframe(df_mock.head())
 else:
+    # Extrae los DataFrames para uso directo en filtros y visualizaciones
+    df_stock = raw_data['stock']
+    df_sales = raw_data['sales']
+    df_product = raw_data['product']
+    df_location = raw_data['location']
+    df_moves = raw_data['moves']
+    df_clients = raw_data['clients']
+    df_purchases = raw_data['purchases']
+
     bi = process_business_logic(
-        raw_data['stock'], raw_data['sales'], raw_data['product'],
-        raw_data['location'], raw_data['moves'], raw_data['clients'],
-        raw_data['purchases'], dias_analisis
+        df_stock, df_sales, df_product,
+        df_location, df_moves, df_clients,
+        df_purchases, dias_analisis
     )
     st.metric("Capital Inmovilizado", f"${bi['capital_inmovilizado']:,.0f}")
     st.dataframe(bi['kpi'].head(20))
@@ -337,6 +346,10 @@ else:
     st.subheader("🔎 Diagnóstico de Inventario")
     st.dataframe(bi['kpi'][['product_name', 'name', 'diagnostico', 'quantity', 'qty_sold', 'cobertura_dias']])
 
-# En el dashboard, para filtrar ventas por estado:
-estado = st.selectbox("Filtrar ventas por estado", df_sales['state'].unique())
-df_sales_filtrado = df_sales[df_sales['state'] == estado]
+    # Ahora puedes usar df_sales para filtros
+    if not df_sales.empty:
+        estado = st.selectbox("Filtrar ventas por estado", df_sales['state'].unique())
+        df_sales_filtrado = df_sales[df_sales['state'] == estado]
+        st.dataframe(df_sales_filtrado.head(10))
+    else:
+        st.warning("No hay datos de ventas para mostrar.")
