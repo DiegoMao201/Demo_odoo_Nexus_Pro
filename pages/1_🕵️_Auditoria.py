@@ -348,9 +348,17 @@ try:
     st.write("Columnas:", df_clients.columns.tolist())
 
     st.subheader("Compras (DataFrame crudo)")
-    st.dataframe(df_purchases.head(10))
-    st.write("Shape:", df_purchases.shape)
-    st.write("Columnas:", df_purchases.columns.tolist())
+    st.subheader("Compras (DataFrame crudo)")
+    try:
+        if 'order_id' in df_purchases.columns:
+            df_purchases['order_id_nombre'] = df_purchases['order_id'].apply(
+                lambda x: x[1] if isinstance(x, list) and len(x) > 1 else (x if isinstance(x, str) else None)
+            )
+        st.dataframe(df_purchases.head(10))
+        st.write("Shape:", df_purchases.shape)
+        st.write("Columnas:", df_purchases.columns.tolist())
+    except Exception as e:
+        st.error(f"Error al extraer DataFrame de compras: {e}")
 
 except Exception as e:
     st.error(f"Error al extraer DataFrames crudos: {e}")
