@@ -334,27 +334,22 @@ if st.sidebar.button("🔄 Cargar y Actualizar Datos desde Odoo"):
         st.success("¡Datos actualizados correctamente desde Odoo!")
 
 # --- 7. LÓGICA DE EJECUCIÓN UI ---
-
-# Carga de datos
 raw_data, is_real = get_master_data()
-bi = process_business_logic(
-    raw_data['stock'], raw_data['sales'], raw_data['product'],
-    raw_data['location'], raw_data['moves'], raw_data['clients'],
-    raw_data['purchases'], dias_analisis
-)
-
-# KPIs principales
-st.metric("Capital Inmovilizado", f"${bi['capital_inmovilizado']:,.0f}")
-st.dataframe(bi['kpi'].head(20))
-
-# Sugerencias de traslado
-st.subheader("🚚 Traslados sugeridos entre tiendas")
-st.dataframe(bi['traslados'])
-
-# Sugerencias de compra
-st.subheader("🛒 Compras sugeridas")
-st.dataframe(bi['compras'])
-
-# Diagnóstico IA
-st.subheader("🔎 Diagnóstico de Inventario")
-st.dataframe(bi['kpi'][['product_name', 'name', 'diagnostico', 'quantity', 'qty_sold', 'cobertura_dias']])
+if not is_real and 'mock' in raw_data:
+    df_mock = raw_data['mock']
+    st.warning("Modo DEMO: usando datos simulados.")
+    st.dataframe(df_mock.head())
+else:
+    bi = process_business_logic(
+        raw_data['stock'], raw_data['sales'], raw_data['product'],
+        raw_data['location'], raw_data['moves'], raw_data['clients'],
+        raw_data['purchases'], dias_analisis
+    )
+    st.metric("Capital Inmovilizado", f"${bi['capital_inmovilizado']:,.0f}")
+    st.dataframe(bi['kpi'].head(20))
+    st.subheader("🚚 Traslados sugeridos entre tiendas")
+    st.dataframe(bi['traslados'])
+    st.subheader("🛒 Compras sugeridas")
+    st.dataframe(bi['compras'])
+    st.subheader("🔎 Diagnóstico de Inventario")
+    st.dataframe(bi['kpi'][['product_name', 'name', 'diagnostico', 'quantity', 'qty_sold', 'cobertura_dias']])

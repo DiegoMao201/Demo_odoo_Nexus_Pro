@@ -59,13 +59,13 @@ class OdooConnector:
     def get_sales_data(self):
         domain = [['state', 'in', ['sale', 'done']]]
         fields = ['product_id', 'product_uom_qty', 'price_subtotal', 'create_date', 'order_id', 'state']
-        
         data = self.models.execute_kw(self.db, self.uid, self.password, 'sale.order.line', 'search_read', [domain], {'fields': fields, 'limit': 10000})
-        
         df = pd.DataFrame(data)
         if not df.empty:
             df['product_id'] = df['product_id'].apply(lambda x: x[0] if isinstance(x, list) else x)
             df['product_name'] = df['product_id'].apply(lambda x: x[1] if isinstance(x, list) and len(x) > 1 else None)
+            df['order_id'] = df['order_id'].apply(lambda x: x[0] if isinstance(x, list) else x)
+            df['order_name'] = df['order_id'].apply(lambda x: x[1] if isinstance(x, list) and len(x) > 1 else None)
             df['qty_sold'] = pd.to_numeric(df['product_uom_qty'], errors='coerce').fillna(0)
             df['revenue'] = pd.to_numeric(df['price_subtotal'], errors='coerce').fillna(0)
             df['date'] = pd.to_datetime(df['create_date'])
@@ -80,7 +80,7 @@ class OdooConnector:
         return df
 
     def get_stock_move_data(self):
-        fields = ['product_id', 'location_id', 'location_dest_id', 'state', 'date', 'quantity_done']
+        fields = ['product_id', 'location_id', 'location_dest_id', 'state', 'date', 'product_qty']
         data = self.models.execute_kw(self.db, self.uid, self.password, 'stock.move', 'search_read', [[]], {'fields': fields, 'limit': 10000})
         df = pd.DataFrame(data)
         if not df.empty:
@@ -90,7 +90,7 @@ class OdooConnector:
             df['location_name'] = df['location_id'].apply(lambda x: x[1] if isinstance(x, list) and len(x) > 1 else None)
             df['location_dest_id'] = df['location_dest_id'].apply(lambda x: x[0] if isinstance(x, list) else x)
             df['location_dest_name'] = df['location_dest_id'].apply(lambda x: x[1] if isinstance(x, list) and len(x) > 1 else None)
-            df['quantity_done'] = pd.to_numeric(df['quantity_done'], errors='coerce').fillna(0)
+            df['quantity_done'] = pd.to_numeric(df['product_qty'], errors='coerce').fillna(0)
             df['date'] = pd.to_datetime(df['date'])
         return df
 
