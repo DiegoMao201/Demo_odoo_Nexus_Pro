@@ -1,5 +1,7 @@
 import streamlit as st
 import pandas as pd
+import zipfile
+from io import BytesIO
 
 st.set_page_config(page_title="Auditoría de Datos", layout="wide")
 
@@ -245,3 +247,40 @@ st.subheader("Ventas (primeros 10 registros)")
 st.dataframe(df_sales.head(10))
 st.write("Total productos con ventas:", df_sales['product_name'].nunique())
 st.write("Suma total de ventas:", df_sales['qty_sold'].sum())
+
+st.header("⬇️ Exportar datos reales de modelos clave a CSV (ZIP)")
+
+if st.button("Exportar todos los modelos a ZIP (CSV por modelo)"):
+    with st.spinner("Extrayendo y exportando datos reales..."):
+        zip_buffer = BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w") as zf:
+            for modelo, nombre in modelos_clave:
+                try:
+                    all_fields = connector.models.execute_kw(
+                        connector.db, connector.uid, connector.password,
+                        modelo, 'fields_get', [], {'attributes': ['string', 'type']}
+                    )
+                    data = connector.models.execute_kw(
+                        connector.db, connector.uid, connector.password,
+                        modelo, 'search_read', [[]], {'fields': list(all_fields.keys()), 'limit': 1000}
+                    )
+                    if data:
+                        df_data = pd.DataFrame(data)
+                        # Procesa campos Many2one: si es lista, muestra solo el nombre
+                        for col in df_data.columns:
+                            if df_data[col].apply(lambda x: isinstance(x, list)).any():
+                                df_data[col] = df_data[col].apply(lambda x: x[1] if isinstance(x, list) and len(x) > 1 else x)
+                        # Guarda el CSV en el ZIP
+                        csv_bytes = df_data.to_csv(index=False).encode("utf-8")
+                        zf.writestr(f"{modelo.replace('.', '_')}.csv", csv_bytes)
+                except Exception as e:
+                    # Si falla un modelo, lo salta y sigue
+                    continue
+        zip_buffer.seek(0)
+        st.download_button(
+            label="📦 Descargar ZIP con todos los CSV",
+            data=zip_buffer,
+            file_name="auditoria_modelos_odoo.zip",
+            mime="application/zip"
+        )
+        st.success("¡Listo! Descarga el ZIP y descomprímelo para ver cada modelo en un CSV separado.")
