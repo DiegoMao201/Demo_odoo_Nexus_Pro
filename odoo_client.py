@@ -32,46 +32,81 @@ class OdooConnector:
 
     def get_stock_data(self):
         """Trae stock valorizado y cantidades"""
-        try:
-            # Filtramos solo ubicación interna para stock real
-            domain = [['location_id.usage', '=', 'internal']]
-            fields = ['product_id', 'quantity', 'value', 'location_id']
-            
-            # Ejecutamos la consulta a Odoo
-            data = self.models.execute_kw(self.db, self.uid, self.password, 'stock.quant', 'search_read', [domain], {'fields': fields, 'limit': 5000})
-            
-            if data:
-                df = pd.DataFrame(data)
-                # Limpieza y formateo de columnas
-                df['product_name'] = df['product_id'].apply(lambda x: x[1] if isinstance(x, list) else 'Desc.')
-                df['location_name'] = df['location_id'].apply(lambda x: x[1] if isinstance(x, list) else 'Desc.')
-                df['quantity'] = pd.to_numeric(df['quantity'].fillna(0))
-                df['value'] = pd.to_numeric(df['value'].fillna(0))
-                return df[['product_name', 'quantity', 'value', 'location_name']]
-            return pd.DataFrame()
-        except Exception as e:
-            # No detenemos la app, solo retornamos vacío para que el dashboard lo maneje
-            print(f"Advertencia Stock: {e}")
-            return pd.DataFrame()
+        domain = [['location_id.usage', '=', 'internal']]
+        fields = ['product_id', 'quantity', 'value', 'location_id', 'in_date']
+        
+        data = self.models.execute_kw(self.db, self.uid, self.password, 'stock.quant', 'search_read', [domain], {'fields': fields, 'limit': 10000})
+        
+        df = pd.DataFrame(data)
+        if not df.empty:
+            df['product_id'] = df['product_id'].apply(lambda x: x[0] if isinstance(x, list) else x)
+            df['product_name'] = df['product_id'].apply(lambda x: x[1] if isinstance(x, list) and len(x) > 1 else None)
+            df['location_id'] = df['location_id'].apply(lambda x: x[0] if isinstance(x, list) else x)
+            df['location_name'] = df['location_id'].apply(lambda x: x[1] if isinstance(x, list) and len(x) > 1 else None)
+            df['quantity'] = pd.to_numeric(df['quantity'], errors='coerce').fillna(0)
+            df['value'] = pd.to_numeric(df['value'], errors='coerce').fillna(0)
+        return df
+
+    def get_product_data(self):
+        fields = ['id', 'name', 'default_code', 'list_price', 'standard_price', 'categ_id', 'active']
+        data = self.models.execute_kw(self.db, self.uid, self.password, 'product.product', 'search_read', [[]], {'fields': fields, 'limit': 10000})
+        df = pd.DataFrame(data)
+        if not df.empty:
+            df['category_id'] = df['categ_id'].apply(lambda x: x[0] if isinstance(x, list) else x)
+            df['category_name'] = df['categ_id'].apply(lambda x: x[1] if isinstance(x, list) and len(x) > 1 else None)
+        return df
 
     def get_sales_data(self):
-        """Trae histórico de ventas (Pedidos confirmados o realizados)"""
-        try:
-            domain = [['state', 'in', ['sale', 'done']]]
-            fields = ['product_id', 'product_uom_qty', 'price_subtotal', 'create_date']
-            
-            # Ejecutamos la consulta a Odoo
-            data = self.models.execute_kw(self.db, self.uid, self.password, 'sale.order.line', 'search_read', [domain], {'fields': fields, 'limit': 5000})
-            
-            if data:
-                df = pd.DataFrame(data)
-                # Limpieza y formateo de columnas
-                df['product_name'] = df['product_id'].apply(lambda x: x[1] if isinstance(x, list) else 'Desc.')
-                df['date'] = pd.to_datetime(df['create_date'])
-                df['qty_sold'] = pd.to_numeric(df['product_uom_qty'].fillna(0))
-                df['revenue'] = pd.to_numeric(df['price_subtotal'].fillna(0))
-                return df[['product_name', 'date', 'qty_sold', 'revenue']]
-            return pd.DataFrame()
-        except Exception as e:
-            print(f"Advertencia Ventas: {e}")
-            return pd.DataFrame()
+        domain = [['state', 'in', ['sale', 'done']]]
+        fields = ['product_id', 'product_uom_qty', 'price_subtotal', 'create_date', 'order_id', 'state']
+        
+        data = self.models.execute_kw(self.db, self.uid, self.password, 'sale.order.line', 'search_read', [domain], {'fields': fields, 'limit': 10000})
+        
+        df = pd.DataFrame(data)
+        if not df.empty:
+            df['product_id'] = df['product_id'].apply(lambda x: x[0] if isinstance(x, list) else x)
+            df['product_name'] = df['product_id'].apply(lambda x: x[1] if isinstance(x, list) and len(x) > 1 else None)
+            df['qty_sold'] = pd.to_numeric(df['product_uom_qty'], errors='coerce').fillna(0)
+            df['revenue'] = pd.to_numeric(df['price_subtotal'], errors='coerce').fillna(0)
+            df['date'] = pd.to_datetime(df['create_date'])
+        return df
+
+    def get_location_data(self):
+        fields = ['id', 'name', 'usage', 'company_id']
+        data = self.models.execute_kw(self.db, self.uid, self.password, 'stock.location', 'search_read', [[]], {'fields': fields, 'limit': 1000})
+        df = pd.DataFrame(data)
+        if not df.empty:
+            df['company_name'] = df['company_id'].apply(lambda x: x[1] if isinstance(x, list) and len(x) > 1 else None)
+        return df
+
+    def get_stock_move_data(self):
+        fields = ['product_id', 'location_id', 'location_dest_id', 'state', 'date', 'quantity_done']
+        data = self.models.execute_kw(self.db, self.uid, self.password, 'stock.move', 'search_read', [[]], {'fields': fields, 'limit': 10000})
+        df = pd.DataFrame(data)
+        if not df.empty:
+            df['product_id'] = df['product_id'].apply(lambda x: x[0] if isinstance(x, list) else x)
+            df['product_name'] = df['product_id'].apply(lambda x: x[1] if isinstance(x, list) and len(x) > 1 else None)
+            df['location_id'] = df['location_id'].apply(lambda x: x[0] if isinstance(x, list) else x)
+            df['location_name'] = df['location_id'].apply(lambda x: x[1] if isinstance(x, list) and len(x) > 1 else None)
+            df['location_dest_id'] = df['location_dest_id'].apply(lambda x: x[0] if isinstance(x, list) else x)
+            df['location_dest_name'] = df['location_dest_id'].apply(lambda x: x[1] if isinstance(x, list) and len(x) > 1 else None)
+            df['quantity_done'] = pd.to_numeric(df['quantity_done'], errors='coerce').fillna(0)
+            df['date'] = pd.to_datetime(df['date'])
+        return df
+
+    def get_partner_data(self):
+        fields = ['id', 'name', 'email', 'phone', 'customer_rank']
+        data = self.models.execute_kw(self.db, self.uid, self.password, 'res.partner', 'search_read', [[['customer_rank', '>', 0]]], {'fields': fields, 'limit': 10000})
+        return pd.DataFrame(data)
+
+    def get_purchase_order_line_data(self):
+        fields = ['product_id', 'order_id', 'product_qty', 'price_unit', 'date_planned']
+        data = self.models.execute_kw(self.db, self.uid, self.password, 'purchase.order.line', 'search_read', [[]], {'fields': fields, 'limit': 10000})
+        df = pd.DataFrame(data)
+        if not df.empty:
+            df['product_id'] = df['product_id'].apply(lambda x: x[0] if isinstance(x, list) else x)
+            df['product_name'] = df['product_id'].apply(lambda x: x[1] if isinstance(x, list) and len(x) > 1 else None)
+            df['qty'] = pd.to_numeric(df['product_qty'], errors='coerce').fillna(0)
+            df['price_unit'] = pd.to_numeric(df['price_unit'], errors='coerce').fillna(0)
+            df['date_planned'] = pd.to_datetime(df['date_planned'])
+        return df
