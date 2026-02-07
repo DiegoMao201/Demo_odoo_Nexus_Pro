@@ -316,7 +316,7 @@ def main():
 
         with col_charts_2:
             st.markdown("### 🥧 Distribución Valorizada")
-            fig_pie = px.donut(
+            fig_pie = px.pie(
                 df_final, 
                 names='Estado', 
                 values='Valor Inventario', 
