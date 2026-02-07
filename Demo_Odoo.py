@@ -320,7 +320,6 @@ if not is_real and 'mock' in raw_data:
     st.warning("Modo DEMO: usando datos simulados.")
     st.dataframe(df_mock.head())
 else:
-    # Extrae los DataFrames para uso directo en filtros y visualizaciones
     df_stock = raw_data['stock']
     df_sales = raw_data['sales']
     df_product = raw_data['product']
@@ -329,6 +328,22 @@ else:
     df_clients = raw_data['clients']
     df_purchases = raw_data['purchases']
 
+    st.header("📦 Stock")
+    st.dataframe(df_stock.head(20))
+    st.header("🛒 Ventas")
+    st.dataframe(df_sales.head(20))
+    st.header("🧾 Productos")
+    st.dataframe(df_product.head(20))
+    st.header("🏬 Ubicaciones")
+    st.dataframe(df_location.head(20))
+    st.header("🚚 Movimientos de Stock")
+    st.dataframe(df_moves.head(20))
+    st.header("👤 Clientes")
+    st.dataframe(df_clients.head(20))
+    st.header("💼 Compras")
+    st.dataframe(df_purchases.head(20))
+
+    # Ahora tu BI Engine puede operar con estos DataFrames
     bi = process_business_logic(
         df_stock, df_sales, df_product,
         df_location, df_moves, df_clients,
@@ -341,12 +356,4 @@ else:
     st.subheader("🛒 Compras sugeridas")
     st.dataframe(bi['compras'])
     st.subheader("🔎 Diagnóstico de Inventario")
-    st.dataframe(bi['kpi'][['product_name', 'name', 'diagnostico', 'quantity', 'qty_sold', 'cobertura_dias']])
-
-    # Ahora puedes usar df_sales para filtros
-    if not df_sales.empty:
-        estado = st.selectbox("Filtrar ventas por estado", df_sales['state'].unique())
-        df_sales_filtrado = df_sales[df_sales['state'] == estado]
-        st.dataframe(df_sales_filtrado.head(10))
-    else:
-        st.warning("No hay datos de ventas para mostrar.")
+    st.dataframe(bi['kpi'][['product_name', 'diagnostico', 'quantity', 'qty_sold', 'cobertura_dias']])
