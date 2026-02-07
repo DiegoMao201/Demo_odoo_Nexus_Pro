@@ -90,7 +90,12 @@ class OdooConnector:
         data = self.models.execute_kw(self.db, self.uid, self.password, 'stock.location', 'search_read', [[]], {'fields': fields, 'limit': 1000})
         df = pd.DataFrame(data)
         if not df.empty:
-            df['company_name'] = df['company_id'].apply(lambda x: x[1] if isinstance(x, list) and len(x) > 1 else None)
+            # Normaliza company_id para mostrar solo el nombre
+            df['company_name'] = df['company_id'].apply(
+                lambda x: x[1] if isinstance(x, list) and len(x) > 1 else (x if isinstance(x, str) else None)
+            )
+            # Elimina la columna original para evitar problemas de tipo
+            df.drop(columns=['company_id'], inplace=True, errors='ignore')
         return df
 
     def get_stock_move_data(self):
@@ -120,6 +125,12 @@ class OdooConnector:
         if not df.empty:
             df['product_id'] = df['product_id'].apply(lambda x: x[0] if isinstance(x, list) else x)
             df['product_name'] = df['product_id'].apply(lambda x: x[1] if isinstance(x, list) and len(x) > 1 else None)
+            # Normaliza order_id para mostrar solo el nombre
+            df['order_id_nombre'] = df['order_id'].apply(
+                lambda x: x[1] if isinstance(x, list) and len(x) > 1 else (x if isinstance(x, str) else None)
+            )
+            # Elimina la columna original para evitar problemas de tipo
+            df.drop(columns=['order_id'], inplace=True, errors='ignore')
             df['qty'] = pd.to_numeric(df['product_qty'], errors='coerce').fillna(0)
             df['price_unit'] = pd.to_numeric(df['price_unit'], errors='coerce').fillna(0)
             df['date_planned'] = pd.to_datetime(df['date_planned'])
