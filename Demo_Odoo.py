@@ -167,11 +167,12 @@ def main():
         col1, col2 = st.columns([2,1])
         with col1:
             st.markdown("### 📈 Cobertura vs Rotación")
+            df_final['bubble_size'] = df_final['quantity'].clip(lower=0)  # evita tamaños negativos
             fig_scatter = px.scatter(
                 df_final,
                 x="cobertura_dias",
                 y="rotacion",
-                size="quantity",
+                size="bubble_size",
                 color="diagnostico",
                 hover_name="product_name",
                 height=420
