@@ -445,7 +445,7 @@ def main():
                 column_config={
                     "Destino Sugerido": st.column_config.SelectboxColumn(
                         "Ubicación Destino",
-                        options=df_raw['Ubicación'].unique(),
+                        options=list(df_raw['Ubicación'].unique()),  # <-- aquí el cambio
                         required=True
                     ),
                     "Cantidad a Mover": st.column_config.NumberColumn(min_value=1)
