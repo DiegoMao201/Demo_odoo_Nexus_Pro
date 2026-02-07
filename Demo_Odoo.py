@@ -147,73 +147,78 @@ def main():
     bi = process_business_logic(df_stock, df_sales, df_product, df_location, dias_analisis)
     df_final = bi['kpi']
 
-    # KPIs
+    # Alias legibles
+    df_final.rename(columns={
+        'product_name': 'Producto',
+        'quantity': 'Stock',
+        'capital_inmovilizado': 'Valor Inventario',
+        'cost_unit': 'Costo Unitario',
+        'qty_sold': 'Unidades Vendidas',
+        'revenue': 'Ingresos',
+        'rotacion': 'Rotación (u/día)',
+        'cobertura_dias': 'Cobertura (días)',
+        'diagnostico': 'Diagnóstico'
+    }, inplace=True)
+
+    # KPIs principales
     k1, k2, k3, k4, k5 = st.columns(5)
-    with k1: st.metric("Capital Inmovilizado", format_currency(bi['capital_inmovilizado']))
-    with k2: st.metric("Productos con Stock", format_number(df_final[df_final['quantity'] > 0]['product_id'].nunique()))
-    with k3: st.metric("Productos Vendidos", format_number(df_final[df_final['qty_sold'] > 0]['product_id'].nunique()))
-    with k4: st.metric("Rotación Prom (u/día)", f"{df_final['rotacion'].mean():.2f}")
-    with k5: st.metric("Cobertura Prom (días)", f"{df_final['cobertura_dias'].mean():.1f}")
+    with k1: st.metric("Valor Inventario", format_currency(df_final['Valor Inventario'].sum()))
+    with k2: st.metric("SKUs con Stock", format_number(df_final[df_final['Stock'] > 0]['Producto'].nunique()))
+    with k3: st.metric("SKUs Vendidos", format_number(df_final[df_final['Unidades Vendidas'] > 0]['Producto'].nunique()))
+    with k4: st.metric("Rotación Prom", f"{df_final['Rotación (u/día)'].mean():.2f}")
+    with k5: st.metric("Cobertura Prom (días)", f"{df_final['Cobertura (días)'].mean():.1f}")
 
     st.markdown("---")
-    tab_kpi, tab_traslados, tab_compras, tab_raw = st.tabs([
+    tab_kpi, tab_traslados, tab_compras = st.tabs([
         "📊 KPIs & Visuales",
         "🚚 Traslados sugeridos",
-        "🛒 Compras sugeridas",
-        "🔎 Datos crudos"
+        "🛒 Compras sugeridas"
     ])
 
     with tab_kpi:
         col1, col2 = st.columns([2,1])
         with col1:
-            st.markdown("### 📈 Cobertura vs Rotación")
-            df_final['bubble_size'] = df_final['quantity'].clip(lower=0)  # evita tamaños negativos
+            st.markdown("### Cobertura vs Rotación")
+            df_final['Tamaño Burbuja'] = df_final['Stock'].clip(lower=0)
             fig_scatter = px.scatter(
                 df_final,
-                x="cobertura_dias",
-                y="rotacion",
-                size="bubble_size",
-                color="diagnostico",
-                hover_name="product_name",
+                x="Cobertura (días)",
+                y="Rotación (u/día)",
+                size="Tamaño Burbuja",
+                color="Diagnóstico",
+                hover_name="Producto",
                 height=420
             )
             st.plotly_chart(fig_scatter, use_container_width=True)
         with col2:
-            st.markdown("### 🥧 Distribución por diagnóstico")
+            st.markdown("### Distribución por Diagnóstico")
             fig_pie = px.pie(
                 df_final,
-                names='diagnostico',
-                values='capital_inmovilizado',
+                names='Diagnóstico',
+                values='Valor Inventario',
                 hole=0.4
             )
             st.plotly_chart(fig_pie, use_container_width=True)
 
-        st.markdown("### 🔎 Tabla KPI por producto")
-        st.dataframe(
-            df_final[['product_id','product_name','quantity','capital_inmovilizado','cost_unit','qty_sold','revenue','rotacion','cobertura_dias','diagnostico']],
-            use_container_width=True, height=500
-        )
-
     with tab_traslados:
-        st.markdown("### 🔄 Traslados sugeridos")
+        st.markdown("### Traslados sugeridos (exceso ➜ quiebre)")
         st.dataframe(bi['traslados'], use_container_width=True, height=400)
 
     with tab_compras:
-        st.markdown("### 🛒 Compras sugeridas")
+        st.markdown("### Compras sugeridas")
         st.dataframe(
-            bi['compras'][['product_name','qty_sold','quantity','cost_unit','cantidad_sugerida']],
+            bi['compras'][['product_name','qty_sold','quantity','cost_unit','cantidad_sugerida']].rename(columns={
+                'product_name':'Producto',
+                'qty_sold':'Unidades Vendidas (periodo)',
+                'quantity':'Stock Actual',
+                'cost_unit':'Costo Unitario',
+                'cantidad_sugerida':'Compra Sugerida'
+            }),
             use_container_width=True, height=400
         )
 
-    with tab_raw:
-        st.markdown("### 📦 Stock (raw)")
-        st.dataframe(df_stock.head(50), use_container_width=True)
-        st.markdown("### 🛒 Ventas (raw)")
-        st.dataframe(df_sales.head(50), use_container_width=True)
-        st.markdown("### 🧾 Productos (raw)")
-        st.dataframe(df_product.head(50), use_container_width=True)
-        st.markdown("### 🏬 Ubicaciones (raw)")
-        st.dataframe(df_location.head(50), use_container_width=True)
+    # Oculta crudos del tablero principal (mantén Auditoría para datos crudos)
+    # Elimina tab_raw del arreglo de tabs si no quieres mostrarlo al usuario final.
 
 if __name__ == "__main__":
     main()
