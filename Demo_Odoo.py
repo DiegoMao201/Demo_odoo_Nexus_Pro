@@ -142,18 +142,18 @@ def get_master_data():
 def process_business_logic(
     df_stock, df_sales, df_product, df_location, df_moves, df_clients, df_purchases, dias_analisis
 ):
-    df_stock = df_stock.merge(df_product, left_on='product_id', right_on='id', suffixes=('_stock', '_prod'), how='left')
-    df_stock = df_stock.merge(df_location, left_on='location_id', right_on='id', suffixes=('', '_loc'), how='left')
-    df_stock['cost_unit'] = df_stock['standard_price']
+    # Rellena product_name en stock usando df_product
+    if 'product_name' not in df_stock.columns or df_stock['product_name'].isnull().any():
+        prod_map = dict(zip(df_product['id'], df_product['name']))
+        df_stock['product_name'] = df_stock['product_id'].map(prod_map)
+
+    df_stock['cost_unit'] = df_stock['standard_price'] if 'standard_price' in df_stock.columns else 0
     df_stock['capital_inmovilizado'] = df_stock['quantity'] * df_stock['cost_unit']
 
-    df_sales = df_sales.merge(df_product, left_on='product_id', right_on='id', suffixes=('_sale', '_prod'), how='left')
-    if 'warehouse_id' in df_sales.columns:
-        df_sales['warehouse_id'] = df_sales['warehouse_id'].apply(lambda x: x[0] if isinstance(x, list) else x)
-        df_sales['warehouse_name'] = df_sales['warehouse_id'].apply(lambda x: x[1] if isinstance(x, list) and len(x) > 1 else None)
-    else:
-        df_sales['warehouse_id'] = np.nan
-        df_sales['warehouse_name'] = np.nan
+    # Rellena product_name en ventas usando df_product
+    if 'product_name' not in df_sales.columns or df_sales['product_name'].isnull().any():
+        prod_map = dict(zip(df_product['id'], df_product['name']))
+        df_sales['product_name'] = df_sales['product_id'].map(prod_map)
 
     ventas_gb = df_sales.groupby(['product_id', 'product_name']).agg({'qty_sold': 'sum', 'revenue': 'sum'}).reset_index()
     stock_gb = df_stock.groupby(['product_id', 'product_name']).agg({'quantity': 'sum', 'capital_inmovilizado': 'sum', 'cost_unit': 'mean'}).reset_index()
