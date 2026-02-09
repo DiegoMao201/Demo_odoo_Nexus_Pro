@@ -63,6 +63,43 @@ class OdooConnector:
                 df.drop(columns=['categ_id'], inplace=True, errors='ignore')
         return df
 
+    def get_product_template_data(self):
+        """Lee productos base (product.template) y su cantidad total disponible."""
+        fields = ['id', 'name', 'default_code', 'categ_id', 'qty_available', 'list_price', 'standard_price', 'active']
+        data = self.models.execute_kw(self.db, self.uid, self.password, 'product.template', 'search_read', [[]], {'fields': fields, 'limit': 10000})
+        df = pd.DataFrame(data)
+        if not df.empty:
+            def extract_categ_name(x):
+                if isinstance(x, list) and len(x) > 1:
+                    return x[1]
+                if isinstance(x, (str, int, float)):
+                    return str(x)
+                return None
+            if 'categ_id' in df.columns:
+                df['categ_id_nombre'] = df['categ_id'].apply(extract_categ_name)
+                df.drop(columns=['categ_id'], inplace=True, errors='ignore')
+        return df
+
+    def get_product_variant_data(self):
+        """Lee variantes de producto (product.product) y su cantidad disponible."""
+        fields = ['id', 'product_tmpl_id', 'name', 'default_code', 'categ_id', 'qty_available', 'list_price', 'standard_price', 'active']
+        data = self.models.execute_kw(self.db, self.uid, self.password, 'product.product', 'search_read', [[]], {'fields': fields, 'limit': 10000})
+        df = pd.DataFrame(data)
+        if not df.empty:
+            def extract_categ_name(x):
+                if isinstance(x, list) and len(x) > 1:
+                    return x[1]
+                if isinstance(x, (str, int, float)):
+                    return str(x)
+                return None
+            if 'categ_id' in df.columns:
+                df['categ_id_nombre'] = df['categ_id'].apply(extract_categ_name)
+                df.drop(columns=['categ_id'], inplace=True, errors='ignore')
+            # Extrae nombre de plantilla si es many2one
+            if 'product_tmpl_id' in df.columns:
+                df['product_template_name'] = df['product_tmpl_id'].apply(lambda x: x[1] if isinstance(x, list) and len(x) > 1 else None)
+        return df
+
     def get_sales_data(self):
         """Trae todas las ventas, sin filtrar por estado"""
         fields = [

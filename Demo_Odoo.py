@@ -4,7 +4,6 @@ import plotly.express as px
 import numpy as np
 from odoo_client import OdooConnector
 
-# --- CONFIGURACIÓN DE PÁGINA Y ESTILOS ---
 st.set_page_config(
     page_title="NEXUS PRO v3.0 | Centro de Comando Estratégico",
     layout="wide",
@@ -41,17 +40,15 @@ def format_number(value):
 def format_percent(value):
     return f"{value:.1%}"
 
-# --- MOTOR DE INTELIGENCIA DE NEGOCIO v3.0 ---
 def process_business_logic(df_stock, df_sales, df_product, df_location, dias_analisis):
     # 1. MAPAS DE ENRIQUECIMIENTO
-    prod_map = {p['id']: {'name': p['name'], 'cost': p.get('standard_price', 0)} for _, p in df_product.iterrows()}
+    prod_map = {p['product_id']: {'name': p['name'], 'cost': p.get('standard_price', 0)} for _, p in df_product.iterrows()}
     loc_map = dict(zip(df_location['id'], df_location['name']))
 
     # 2. ENRIQUECER DATAFRAMES
     df_stock['product_name'] = df_stock['product_id'].map(lambda x: prod_map.get(x, {}).get('name'))
     df_stock['cost_unit'] = df_stock['product_id'].map(lambda x: prod_map.get(x, {}).get('cost', 0))
     df_stock['capital_inmovilizado'] = df_stock['quantity'] * df_stock['cost_unit']
-    df_stock['location_name'] = df_stock['location_id'].map(loc_map)
 
     df_sales['product_name'] = df_sales['product_id'].map(lambda x: prod_map.get(x, {}).get('name'))
     df_sales['cost_unit'] = df_sales['product_id'].map(lambda x: prod_map.get(x, {}).get('cost', 0))
@@ -67,7 +64,7 @@ def process_business_logic(df_stock, df_sales, df_product, df_location, dias_ana
         qty_sold=('qty_sold', 'sum'),
         revenue=('revenue', 'sum'),
         gross_margin=('gross_margin', 'sum'),
-        sales_std_dev=('qty_sold', 'std') # Para análisis XYZ
+        sales_std_dev=('qty_sold', 'std')
     )
     ventas_gb['sales_std_dev'] = ventas_gb['sales_std_dev'].fillna(0)
 
@@ -92,7 +89,7 @@ def process_business_logic(df_stock, df_sales, df_product, df_location, dias_ana
                                    np.where(df_final['revenue_share'] <= 0.95, 'B', 'C'))
 
     # 6. ANÁLISIS XYZ (Basado en Volatilidad de Ventas)
-    cv_threshold_y = 0.5 # Coeficiente de variación
+    cv_threshold_y = 0.5
     cv_threshold_z = 1.0
     mean_sales = df_final['qty_sold'].mean()
     df_final['coeff_variation'] = df_final['sales_std_dev'] / mean_sales
@@ -120,13 +117,18 @@ def process_business_logic(df_stock, df_sales, df_product, df_location, dias_ana
     compras = df_final[df_final['diagnostico'].str.contains("COMPRA|RIESGO")].copy()
     compras['cantidad_sugerida'] = (compras['rotacion_diaria'] * 30 - compras['quantity']).clip(lower=1).astype(int)
 
-    traslados_df = df_stock.groupby(['product_id', 'location_id', 'location_name']).agg(quantity=('quantity', 'sum')).reset_index()
+    traslados_df = df_stock.groupby(['product_id'], as_index=False).agg(quantity=('quantity', 'sum'))
     traslados_df['product_name'] = traslados_df['product_id'].map(lambda x: prod_map.get(x, {}).get('name'))
     traslados_df = pd.merge(traslados_df, df_final[['product_id', 'cobertura_dias']], on='product_id')
 
     sugerencias_traslado = []
-    for prod_id in traslados_df['product_id'].unique():
-        prod_locations = traslados_df[traslados_df['product_id'] == prod_id]
+    # Si quieres sugerencias de traslado por ubicación, deberías usar stock.quant y agrupar por location_id
+    # Aquí solo se deja la estructura básica
+    df_stock['location_name'] = df_stock['location_id'].map(loc_map) if 'location_id' in df_stock.columns and 'location_id' in loc_map else None
+    for prod_id in df_stock['product_id'].unique():
+        prod_locations = df_stock[df_stock['product_id'] == prod_id]
+        if prod_locations.empty:
+            continue
         exceso_locs = prod_locations[prod_locations['quantity'] > (prod_locations['quantity'].mean() * 1.5)]
         quiebre_locs = prod_locations[prod_locations['quantity'] == 0]
         if not exceso_locs.empty and not quiebre_locs.empty:
@@ -134,9 +136,9 @@ def process_business_logic(df_stock, df_sales, df_product, df_location, dias_ana
             a = quiebre_locs.iloc[0]
             sugerencias_traslado.append({
                 'Producto': de['product_name'],
-                'Desde (Tienda)': de['location_name'],
+                'Desde (Tienda)': de.get('location_name', ''),
                 'Stock Origen': de['quantity'],
-                'Hacia (Tienda)': a['location_name'],
+                'Hacia (Tienda)': a.get('location_name', ''),
                 'Cantidad a Mover': int(max(1, de['quantity'] * 0.25))
             })
     df_traslados = pd.DataFrame(sugerencias_traslado)
@@ -147,7 +149,6 @@ def process_business_logic(df_stock, df_sales, df_product, df_location, dias_ana
         'compras': compras
     }
 
-# --- INTERFAZ DE USUARIO (DASHBOARD) ---
 def main():
     st.markdown(f"## 💎 **NEXUS PRO v3.0** | Centro de Comando Estratégico")
     st.markdown(f"_{pd.to_datetime('today').strftime('%A, %d de %B de %Y')} | Datos en vivo desde Odoo_")
@@ -161,21 +162,36 @@ def main():
     try:
         connector = OdooConnector()
         with st.spinner("Conectando con Odoo y extrayendo datos maestros..."):
-            df_stock = connector.get_stock_data()
+            # INVENTARIO REAL: product.template con qty_available
+            df_stock = connector.get_product_template_data()
+            df_stock.rename(columns={'qty_available': 'quantity', 'name': 'product_name', 'id': 'product_id'}, inplace=True)
+
+            # VENTAS REALES: sale.order.line
             df_sales = connector.get_sales_data()
+            # Agrupa ventas por producto
+            ventas_gb = df_sales.groupby('product_id', as_index=False).agg(
+                qty_sold=('product_uom_qty', 'sum'),
+                revenue=('price_subtotal', 'sum')
+            )
+            ventas_gb['product_id'] = ventas_gb['product_id'].astype(int)
+
+            # PRODUCTOS: para enriquecer con info adicional
             df_product = connector.get_product_data()
+            df_product.rename(columns={'id': 'product_id'}, inplace=True)
+
+            # UBICACIONES: si las necesitas
             df_location = connector.get_location_data()
     except Exception as e:
         st.error(f"Error fatal al conectar o cargar datos de Odoo: {e}")
         st.stop()
 
-    if df_stock.empty or df_sales.empty or df_product.empty:
+    if df_stock.empty or ventas_gb.empty or df_product.empty:
         st.error("No se encontraron datos suficientes en Odoo (stock, ventas o productos) para realizar el análisis.")
         st.stop()
 
     # Procesamiento
     with st.spinner("Aplicando inteligencia de negocio..."):
-        bi = process_business_logic(df_stock, df_sales, df_product, df_location, dias_analisis)
+        bi = process_business_logic(df_stock, ventas_gb, df_product, df_location, dias_analisis)
         df_final = bi['kpi']
 
     # --- PESTAÑAS DEL DASHBOARD ---
@@ -213,7 +229,6 @@ def main():
         st.subheader("Matriz de Decisión Estratégica ABC-XYZ")
         st.info("Clasifica tus productos para enfocar tus esfuerzos. **A**: Más importantes (80% ingresos). **X**: Demanda más estable.")
 
-        # Crear la matriz para el heatmap
         matrix = df_final.pivot_table(index='abc_class', columns='xyz_class', values='product_id', aggfunc='count').fillna(0)
         matrix = matrix.reindex(index=['A', 'B', 'C'], columns=['X', 'Y', 'Z'])
 
