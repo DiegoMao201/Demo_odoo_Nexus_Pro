@@ -101,13 +101,13 @@ class OdooConnector:
         return df
 
     def get_sales_data(self):
-        """Trae todas las ventas, sin filtrar por estado"""
+        """Trae solo ventas confirmadas (sale, done)"""
         fields = [
             'id', 'order_id', 'product_id', 'product_uom_qty', 'qty_delivered',
             'price_unit', 'price_subtotal', 'create_date', 'state', 'warehouse_id',
             'qty_invoiced', 'qty_to_invoice'
         ]
-        domain = []  # Sin filtro, trae todas las ventas
+        domain = [['state', 'in', ['sale', 'done']]]
         data = self.models.execute_kw(self.db, self.uid, self.password, 'sale.order.line', 'search_read', [domain], {'fields': fields, 'limit': 10000})
         df = pd.DataFrame(data)
         if not df.empty:

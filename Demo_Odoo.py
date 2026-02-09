@@ -170,8 +170,8 @@ def main():
             df_sales = connector.get_sales_data()
             # Agrupa ventas por producto
             ventas_gb = df_sales.groupby('product_id', as_index=False).agg(
-                qty_sold=('product_uom_qty', 'sum'),
-                revenue=('price_subtotal', 'sum')
+                qty_sold=('qty_sold', 'sum'),
+                revenue=('revenue', 'sum')
             )
             ventas_gb['product_id'] = ventas_gb['product_id'].astype(int)
 
