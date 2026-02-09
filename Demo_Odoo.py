@@ -161,10 +161,12 @@ def main():
     # Carga de datos
     try:
         connector = OdooConnector()
-        with st.spinner("Conectando con Odoo y extrayendo datos maestros..."):
+        with st.spinner("Conectando con Odoo y extrayendo datos..."):
             # INVENTARIO REAL: product.template con qty_available
-            df_stock = connector.get_product_template_data()
-            df_stock.rename(columns={'qty_available': 'quantity', 'name': 'product_name', 'id': 'product_id'}, inplace=True)
+            df_product = connector.get_product_template_data()
+            df_product.rename(columns={'id': 'product_id'}, inplace=True)
+            df_stock = df_product[['product_id', 'name', 'qty_available', 'list_price', 'standard_price', 'categ_id_nombre', 'active']]
+            df_stock.rename(columns={'qty_available': 'quantity', 'name': 'product_name'}, inplace=True)
 
             # VENTAS REALES: sale.order.line
             df_sales = connector.get_sales_data()

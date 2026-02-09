@@ -31,10 +31,9 @@ class OdooConnector:
             st.stop()
 
     def get_stock_data(self):
-        """Trae stock de todas las ubicaciones (no solo 'internal')"""
-        domain = []  # Sin filtro, trae todo el stock
-        fields = ['product_id', 'quantity', 'value', 'location_id', 'in_date']
-        data = self.models.execute_kw(self.db, self.uid, self.password, 'stock.quant', 'search_read', [domain], {'fields': fields, 'limit': 10000})
+        """Trae stock por ubicación (tienda) usando stock.quant."""
+        fields = ['product_id', 'location_id', 'quantity']
+        data = self.models.execute_kw(self.db, self.uid, self.password, 'stock.quant', 'search_read', [[]], {'fields': fields, 'limit': 10000})
         df = pd.DataFrame(data)
         if not df.empty:
             df['product_id'] = df['product_id'].apply(lambda x: x[0] if isinstance(x, list) else x)
@@ -42,7 +41,6 @@ class OdooConnector:
             df['location_id'] = df['location_id'].apply(lambda x: x[0] if isinstance(x, list) else x)
             df['location_name'] = df['location_id'].apply(lambda x: x[1] if isinstance(x, list) and len(x) > 1 else None)
             df['quantity'] = pd.to_numeric(df['quantity'], errors='coerce').fillna(0)
-            df['value'] = pd.to_numeric(df['value'], errors='coerce').fillna(0)
         return df
 
     def get_product_data(self):
@@ -64,20 +62,21 @@ class OdooConnector:
         return df
 
     def get_product_template_data(self):
-        """Lee productos base (product.template) y su cantidad total disponible."""
-        fields = ['id', 'name', 'default_code', 'categ_id', 'qty_available', 'list_price', 'standard_price', 'active']
+        """Extrae todos los campos relevantes de product.template."""
+        fields = [
+            'id', 'name', 'default_code', 'barcode', 'categ_id', 'qty_available', 'virtual_available',
+            'incoming_qty', 'outgoing_qty', 'list_price', 'standard_price', 'sale_ok', 'purchase_ok',
+            'active', 'weight', 'volume', 'uom_id', 'company_id', 'description', 'description_sale',
+            'description_purchase', 'image_1920', 'website_published', 'website_url', 'x_studio_ref_madre'
+        ]
         data = self.models.execute_kw(self.db, self.uid, self.password, 'product.template', 'search_read', [[]], {'fields': fields, 'limit': 10000})
         df = pd.DataFrame(data)
         if not df.empty:
-            def extract_categ_name(x):
-                if isinstance(x, list) and len(x) > 1:
-                    return x[1]
-                if isinstance(x, (str, int, float)):
-                    return str(x)
-                return None
-            if 'categ_id' in df.columns:
-                df['categ_id_nombre'] = df['categ_id'].apply(extract_categ_name)
-                df.drop(columns=['categ_id'], inplace=True, errors='ignore')
+            # Normaliza campos many2one
+            df['categ_id_nombre'] = df['categ_id'].apply(lambda x: x[1] if isinstance(x, list) and len(x) > 1 else None)
+            df['uom_name'] = df['uom_id'].apply(lambda x: x[1] if isinstance(x, list) and len(x) > 1 else None)
+            df['company_name'] = df['company_id'].apply(lambda x: x[1] if isinstance(x, list) and len(x) > 1 else None)
+            df.drop(columns=['categ_id', 'uom_id', 'company_id'], inplace=True, errors='ignore')
         return df
 
     def get_product_variant_data(self):
@@ -101,11 +100,10 @@ class OdooConnector:
         return df
 
     def get_sales_data(self):
-        """Trae solo ventas confirmadas (sale, done)"""
+        """Extrae ventas confirmadas de sale.order.line, incluyendo warehouse_id."""
         fields = [
             'id', 'order_id', 'product_id', 'product_uom_qty', 'qty_delivered',
-            'price_unit', 'price_subtotal', 'create_date', 'state', 'warehouse_id',
-            'qty_invoiced', 'qty_to_invoice'
+            'price_unit', 'price_subtotal', 'create_date', 'state', 'warehouse_id'
         ]
         domain = [['state', 'in', ['sale', 'done']]]
         data = self.models.execute_kw(self.db, self.uid, self.password, 'sale.order.line', 'search_read', [domain], {'fields': fields, 'limit': 10000})
@@ -113,8 +111,6 @@ class OdooConnector:
         if not df.empty:
             df['product_id'] = df['product_id'].apply(lambda x: x[0] if isinstance(x, list) else x)
             df['product_name'] = df['product_id'].apply(lambda x: x[1] if isinstance(x, list) and len(x) > 1 else None)
-            df['order_id'] = df['order_id'].apply(lambda x: x[0] if isinstance(x, list) else x)
-            df['order_name'] = df['order_id'].apply(lambda x: x[1] if isinstance(x, list) and len(x) > 1 else None)
             df['warehouse_id'] = df['warehouse_id'].apply(lambda x: x[0] if isinstance(x, list) else x)
             df['warehouse_name'] = df['warehouse_id'].apply(lambda x: x[1] if isinstance(x, list) and len(x) > 1 else None)
             df['qty_sold'] = pd.to_numeric(df['product_uom_qty'], errors='coerce').fillna(0)
