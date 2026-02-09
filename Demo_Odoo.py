@@ -162,13 +162,11 @@ def main():
     try:
         connector = OdooConnector()
         with st.spinner("Conectando con Odoo y extrayendo datos..."):
-            # STOCK POR TIENDA/UBICACIÓN
-            df_stock = connector.get_stock_data()
-            # ATRIBUTOS DE PRODUCTO
+            # INVENTARIO REAL: product.template con qty_available
             df_product = connector.get_product_template_data()
             df_product.rename(columns={'id': 'product_id'}, inplace=True)
-            # ENRIQUECE STOCK CON ATRIBUTOS DE PRODUCTO
-            df_stock = df_stock.merge(df_product, on='product_id', how='left')
+            df_stock = df_product[['product_id', 'name', 'qty_available', 'list_price', 'standard_price', 'categ_id_nombre', 'active']]
+            df_stock.rename(columns={'qty_available': 'quantity', 'name': 'product_name'}, inplace=True)
 
             # VENTAS REALES: sale.order.line
             df_sales = connector.get_sales_data()
@@ -178,7 +176,7 @@ def main():
             )
             ventas_gb['product_id'] = ventas_gb['product_id'].astype(int)
 
-            # UBICACIONES
+            # UBICACIONES (opcional, si quieres mostrar info de tiendas)
             df_location = connector.get_location_data()
     except Exception as e:
         st.error(f"Error fatal al conectar o cargar datos de Odoo: {e}")
