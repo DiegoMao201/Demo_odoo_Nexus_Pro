@@ -100,11 +100,9 @@ class OdooConnector:
         return df
 
     def get_sales_data(self):
-        """Extrae ventas confirmadas de sale.order.line, incluyendo warehouse_id."""
-        fields = [
-            'id', 'order_id', 'product_id', 'product_uom_qty', 'price_subtotal', 'create_date', 'state'
-        ]
-        domain = [['state', 'in', ['sale', 'done']]]
+        """Extrae ventas de sale.order.line (todas las líneas para pruebas)."""
+        fields = ['id', 'order_id', 'product_id', 'product_uom_qty', 'price_subtotal', 'create_date', 'state']
+        domain = []  # sin filtro de estado para no perder ventas de prueba
         data = self.models.execute_kw(self.db, self.uid, self.password, 'sale.order.line', 'search_read', [domain], {'fields': fields, 'limit': 10000})
         df = pd.DataFrame(data)
         if not df.empty:

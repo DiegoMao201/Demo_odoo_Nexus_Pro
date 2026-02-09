@@ -41,11 +41,9 @@ def format_percent(value):
     return f"{value:.1%}"
 
 def process_business_logic(df_stock, df_sales, df_product, df_location, dias_analisis):
-    # 1. MAPAS DE ENRIQUECIMIENTO
-    prod_map = {p['product_id']: {'name': p['name'], 'cost': p.get('standard_price', 0)} for _, p in df_product.iterrows()}
+    prod_map = {p['product_id'] if 'product_id' in p else p['id']: {'name': p.get('product_name', p.get('name')), 'cost': p.get('standard_price', 0)} for _, p in df_product.iterrows()}
     loc_map = dict(zip(df_location['id'], df_location['name']))
 
-    # 2. ENRIQUECER DATAFRAMES
     df_stock['product_name'] = df_stock['product_id'].map(lambda x: prod_map.get(x, {}).get('name'))
     df_stock['cost_unit'] = df_stock['product_id'].map(lambda x: prod_map.get(x, {}).get('cost', 0))
     df_stock['capital_inmovilizado'] = df_stock['quantity'] * df_stock['cost_unit']
