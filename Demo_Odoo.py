@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from odoo_cliente import OdooConnector
+from odoo_client import OdooConnector
 import time
 
 # Configuración de página
