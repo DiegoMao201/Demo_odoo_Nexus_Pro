@@ -41,8 +41,8 @@ def format_percent(value):
     return f"{value:.1%}"
 
 def process_business_logic(df_stock, df_sales, df_product, df_location, dias_analisis):
-    prod_map = {p['product_id'] if 'product_id' in p else p['id']: {'name': p.get('product_name', p.get('name')), 'cost': p.get('standard_price', 0)} for _, p in df_product.iterrows()}
-    loc_map = dict(zip(df_location['id'], df_location['name']))
+    prod_map = {p['product_id']: {'name': p.get('product_name', p.get('name')), 'cost': p.get('standard_price', 0)} for _, p in df_product.iterrows()}
+    loc_map = dict(zip(df_location['id'], df_location['name'])) if not df_location.empty else {}
 
     df_stock['product_name'] = df_stock['product_id'].map(lambda x: prod_map.get(x, {}).get('name'))
     df_stock['cost_unit'] = df_stock['product_id'].map(lambda x: prod_map.get(x, {}).get('cost', 0))
@@ -153,38 +153,43 @@ def main():
 
     with st.sidebar:
         st.title("Configuración de Análisis")
-        dias_analisis = st.slider("📅 Ventana Histórica (Días)", 30, 365, 90, help="Define el período para calcular la rotación y la demanda.")
-        st.info("Este tablero utiliza análisis ABC-XYZ para una gestión de inventario inteligente y proactiva.")
+        dias_analisis = st.slider("📅 Ventana Histórica (Días)", 30, 365, 90)
+        st.info("Este tablero utiliza análisis ABC-XYZ para inventario.")
 
-    # Carga de datos
     try:
         connector = OdooConnector()
         with st.spinner("Conectando con Odoo y extrayendo datos..."):
-            # INVENTARIO REAL: product.template con qty_available
-            df_product = connector.get_product_template_data()
+            # INVENTARIO y PRODUCTOS desde product.product (variante) para alinear con sale.order.line
+            df_product = connector.get_product_data()          # contiene id = variante
             df_product.rename(columns={'id': 'product_id'}, inplace=True)
-            df_stock = df_product[['product_id', 'name', 'qty_available', 'list_price', 'standard_price', 'categ_id_nombre', 'active']]
-            df_stock.rename(columns={'qty_available': 'quantity', 'name': 'product_name'}, inplace=True)
 
-            # VENTAS REALES: sale.order.line
+            # STOCK desde stock.quant
+            df_stock = connector.get_stock_data()
+            # VENTAS desde sale.order.line
             df_sales = connector.get_sales_data()
-            ventas_gb = df_sales.groupby('product_id', as_index=False).agg(
-                qty_sold=('qty_sold', 'sum'),
-                revenue=('revenue', 'sum')
-            )
-            ventas_gb['product_id'] = ventas_gb['product_id'].astype(int)
 
-            # UBICACIONES (opcional, si quieres mostrar info de tiendas)
+            # UBICACIONES
             df_location = connector.get_location_data()
     except Exception as e:
         st.error(f"Error fatal al conectar o cargar datos de Odoo: {e}")
         st.stop()
 
-    if df_stock.empty or ventas_gb.empty or df_product.empty:
-        st.error("No se encontraron datos suficientes en Odoo (stock, ventas o productos) para realizar el análisis.")
+    # Si no hay ventas, evita cálculos que den NaN/inf y muestra aviso
+    if df_sales.empty:
+        st.warning("No hay líneas de venta en Odoo (sale.order.line está vacío). Se mostrarán solo KPIs de stock.")
+        ventas_gb = pd.DataFrame(columns=['product_id', 'qty_sold', 'revenue'])
+    else:
+        ventas_gb = df_sales.groupby('product_id', as_index=False).agg(
+            qty_sold=('qty_sold', 'sum'),
+            revenue=('revenue', 'sum')
+        )
+        ventas_gb['product_id'] = pd.to_numeric(ventas_gb['product_id'], errors='coerce')
+
+    # Si no hay stock, aborta
+    if df_stock.empty or df_product.empty:
+        st.error("No hay datos de stock o productos en Odoo.")
         st.stop()
 
-    # Procesamiento
     with st.spinner("Aplicando inteligencia de negocio..."):
         bi = process_business_logic(df_stock, ventas_gb, df_product, df_location, dias_analisis)
         df_final = bi['kpi']
