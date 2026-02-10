@@ -31,16 +31,14 @@ class OdooConnector:
             st.stop()
 
     def get_stock_data(self):
-        """Trae stock por ubicación (tienda) usando stock.quant."""
-        fields = ['product_id', 'location_id', 'quantity']
-        data = self.models.execute_kw(self.db, self.uid, self.password, 'stock.quant', 'search_read', [[]], {'fields': fields, 'limit': 10000})
+        """Stock a nivel variante desde product.product (qty_available)."""
+        fields = ['id', 'name', 'qty_available', 'standard_price', 'categ_id']
+        data = self.models.execute_kw(self.db, self.uid, self.password, 'product.product', 'search_read', [[]], {'fields': fields, 'limit': 10000})
         df = pd.DataFrame(data)
         if not df.empty:
-            df['product_id'] = df['product_id'].apply(lambda x: x[0] if isinstance(x, list) else x)
-            df['product_name'] = df['product_id'].apply(lambda x: x[1] if isinstance(x, list) and len(x) > 1 else None)
-            df['location_id'] = df['location_id'].apply(lambda x: x[0] if isinstance(x, list) else x)
-            df['location_name'] = df['location_id'].apply(lambda x: x[1] if isinstance(x, list) and len(x) > 1 else None)
-            df['quantity'] = pd.to_numeric(df['quantity'], errors='coerce').fillna(0)
+            df.rename(columns={'id': 'product_id', 'qty_available': 'quantity', 'name': 'product_name'}, inplace=True)
+            df['quantity'] = pd.to_numeric(df['quantity'], errors='coerce').fillna(0).clip(lower=0)  # sin negativos
+            df['standard_price'] = pd.to_numeric(df['standard_price'], errors='coerce').fillna(0)
         return df
 
     def get_product_data(self):
@@ -162,3 +160,10 @@ class OdooConnector:
             df['price_unit'] = pd.to_numeric(df['price_unit'], errors='coerce').fillna(0)
             df['date_planned'] = pd.to_datetime(df['date_planned'])
         return df
+
+def process_business_logic(df_stock, df_sales, df_product, df_location, dias_analisis):
+    prod_map = {p['product_id']: {'name': p.get('product_name', p.get('name')), 'cost': p.get('standard_price', 0)} for _, p in df_product.iterrows()}
+    df_stock['product_name'] = df_stock['product_id'].map(lambda x: prod_map.get(x, {}).get('name', df_stock.get('product_name')))
+    df_stock['cost_unit'] = df_stock['product_id'].map(lambda x: prod_map.get(x, {}).get('cost', 0))
+    df_stock['capital_inmovilizado'] = df_stock['quantity'] * df_stock['cost_unit']
+    # resto igual

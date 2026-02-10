@@ -42,9 +42,7 @@ def format_percent(value):
 
 def process_business_logic(df_stock, df_sales, df_product, df_location, dias_analisis):
     prod_map = {p['product_id']: {'name': p.get('product_name', p.get('name')), 'cost': p.get('standard_price', 0)} for _, p in df_product.iterrows()}
-    loc_map = dict(zip(df_location['id'], df_location['name'])) if not df_location.empty else {}
-
-    df_stock['product_name'] = df_stock['product_id'].map(lambda x: prod_map.get(x, {}).get('name'))
+    df_stock['product_name'] = df_stock['product_id'].map(lambda x: prod_map.get(x, {}).get('name', df_stock.get('product_name')))
     df_stock['cost_unit'] = df_stock['product_id'].map(lambda x: prod_map.get(x, {}).get('cost', 0))
     df_stock['capital_inmovilizado'] = df_stock['quantity'] * df_stock['cost_unit']
 
