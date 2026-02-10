@@ -1,265 +1,251 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import numpy as np
-from odoo_client import OdooConnector
+import plotly.graph_objects as go
+from odoo_cliente import OdooConnector
+import time
 
-st.set_page_config(
-    page_title="NEXUS PRO v3.0 | Centro de Comando Estratégico",
-    layout="wide",
-    page_icon="💎",
-    initial_sidebar_state="expanded"
-)
+# Configuración de página
+st.set_page_config(page_title="GM-DATOVATE | Super BI Odoo", layout="wide", page_icon="📊")
 
+# --- ESTILOS CSS ---
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap');
-    html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
-    .stApp { background-color: #f0f2f6; }
-    h1, h2, h3 { color: #1e293b; font-weight: 800; letter-spacing: -0.5px; }
-    .stTabs [data-baseweb="tab-list"] { gap: 12px; }
-    .stTabs [data-baseweb="tab"] {
-        height: 48px; background-color: #ffffff; border-radius: 8px; font-weight: 600;
-        color: #475569; border: 1px solid #e2e8f0; padding: 0 24px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-    }
-    .stTabs [aria-selected="true"] { background-color: #2563eb; color: #ffffff !important; border-color: #2563eb; }
-    div[data-testid="metric-container"] {
-        background-color: #ffffff; border: 1px solid #e2e8f0; padding: 20px;
-        border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);
-    }
-    .block-container { padding-top: 2rem; padding-bottom: 3rem; }
+    .metric-card {background-color: #f0f2f6; padding: 20px; border-radius: 10px; border-left: 5px solid #4CAF50;}
+    .alert-card {background-color: #ffebee; padding: 15px; border-radius: 5px; border: 1px solid #ffcdd2;}
 </style>
 """, unsafe_allow_html=True)
 
-def format_currency(value):
-    return f"$ {value:,.0f}"
+# --- FUNCIÓN DE CARGA DE DATOS (CON CACHÉ) ---
+@st.cache_data(ttl=300) # Se actualiza cada 5 minutos
+def load_data():
+    connector = OdooConnector()
+    
+    with st.spinner('Conectando al núcleo de Odoo... Extrayendo Productos...'):
+        df_prod = connector.get_products_detailed()
+        
+    with st.spinner('Analizando Bodegas (Stock Quant)...'):
+        df_stock = connector.get_stock_quants()
+        
+    with st.spinner('Procesando Histórico de Ventas...'):
+        df_sales = connector.get_sales_lines()
 
-def format_number(value):
-    return f"{value:,.0f}"
+    return df_prod, df_stock, df_sales
 
-def format_percent(value):
-    return f"{value:.1%}"
+# --- LÓGICA DE NEGOCIO (EL CEREBRO) ---
+def process_data(df_prod, df_stock, df_sales):
+    # 1. Enriquecer Stock con datos del producto (Costo, Precio, Categoría)
+    # Hacemos merge left para mantener el stock aunque falten datos maestros
+    df_stock_full = pd.merge(df_stock, df_prod, on='product_id', how='left')
+    
+    # Calcular valoración real del inventario
+    df_stock_full['valor_inventario_costo'] = df_stock_full['stock_real_ubicacion'] * df_stock_full['standard_price']
+    df_stock_full['valor_inventario_venta'] = df_stock_full['stock_real_ubicacion'] * df_stock_full['list_price']
 
-def process_business_logic(df_stock, df_sales, df_product, df_location, dias_analisis):
-    prod_map = {p['product_id']: {'name': p.get('product_name', p.get('name')), 'cost': p.get('standard_price', 0)} for _, p in df_product.iterrows()}
-    df_stock['product_name'] = df_stock['product_id'].map(lambda x: prod_map.get(x, {}).get('name', df_stock.get('product_name')))
-    df_stock['cost_unit'] = df_stock['product_id'].map(lambda x: prod_map.get(x, {}).get('cost', 0))
-    df_stock['capital_inmovilizado'] = df_stock['quantity'] * df_stock['cost_unit']
+    # 2. Análisis de Ventas por Producto
+    sales_summary = df_sales.groupby('product_id').agg({
+        'qty_sold': 'sum',
+        'revenue': 'sum',
+        'date': 'max' # Última fecha de venta
+    }).reset_index()
+    
+    # Calcular venta diaria promedio (asumiendo historial completo cargado, ajustar según filtro fecha)
+    dias_analisis = (df_sales['date'].max() - df_sales['date'].min()).days
+    if dias_analisis == 0: dias_analisis = 1
+    sales_summary['venta_diaria_promedio'] = sales_summary['qty_sold'] / dias_analisis
 
-    df_sales['product_name'] = df_sales['product_id'].map(lambda x: prod_map.get(x, {}).get('name'))
-    df_sales['cost_unit'] = df_sales['product_id'].map(lambda x: prod_map.get(x, {}).get('cost', 0))
-    df_sales['cost_of_goods_sold'] = df_sales['qty_sold'] * df_sales['cost_unit']
-    df_sales['gross_margin'] = df_sales['revenue'] - df_sales['cost_of_goods_sold']
+    # 3. MASTER DATA: Unimos todo en un gran DataFrame Maestro
+    df_master = pd.merge(df_prod, sales_summary, on='product_id', how='left')
+    df_master['qty_sold'] = df_master['qty_sold'].fillna(0)
+    df_master['revenue'] = df_master['revenue'].fillna(0)
+    df_master['venta_diaria_promedio'] = df_master['venta_diaria_promedio'].fillna(0)
 
-    # 3. AGREGADOS POR PRODUCTO
-    stock_gb = df_stock.groupby('product_id', as_index=False).agg(
-        quantity=('quantity', 'sum'),
-        capital_inmovilizado=('capital_inmovilizado', 'sum')
+    # 4. Cálculo de KPIs avanzados
+    # Días de Inventario (DOI) = Stock Actual / Venta Diaria
+    df_master['dias_inventario'] = df_master.apply(
+        lambda row: row['stock_total_teorico'] / row['venta_diaria_promedio'] if row['venta_diaria_promedio'] > 0 else 999, axis=1
     )
-    ventas_gb = df_sales.groupby('product_id', as_index=False).agg(
-        qty_sold=('qty_sold', 'sum'),
-        revenue=('revenue', 'sum'),
-        gross_margin=('gross_margin', 'sum'),
-        sales_std_dev=('qty_sold', 'std')
-    )
-    ventas_gb['sales_std_dev'] = ventas_gb['sales_std_dev'].fillna(0)
+    
+    # Clasificación de Estado
+    def clasificar_stock(row):
+        if row['stock_total_teorico'] <= 0: return "Agotado"
+        if row['dias_inventario'] < 7: return "Crítico (Reabastecer)"
+        if row['dias_inventario'] > 90: return "Sobre-stock"
+        return "Saludable"
+    
+    df_master['estado_inventario'] = df_master.apply(clasificar_stock, axis=1)
 
-    # 4. MERGE FINAL Y KPIs BÁSICOS
-    df_final = pd.merge(stock_gb, ventas_gb, on='product_id', how='outer').fillna(0)
-    df_final['product_name'] = df_final['product_id'].map(lambda x: prod_map.get(x, {}).get('name'))
-    df_final['cost_unit'] = df_final['product_id'].map(lambda x: prod_map.get(x, {}).get('cost', 0))
-    df_final.dropna(subset=['product_name'], inplace=True)
+    return df_master, df_stock_full, df_sales
 
-    df_final['rotacion_diaria'] = df_final['qty_sold'] / dias_analisis
-    df_final['cobertura_dias'] = df_final['quantity'] / df_final['rotacion_diaria'].replace(0, np.nan)
-    df_final['cobertura_dias'] = df_final['cobertura_dias'].replace([np.inf, -np.inf], 999).fillna(999)
-    df_final['sell_through_rate'] = df_final['qty_sold'] / (df_final['qty_sold'] + df_final['quantity']).replace(0, np.nan)
-    df_final['gmroi'] = df_final['gross_margin'] / df_final['capital_inmovilizado'].replace(0, np.nan)
+# --- INTERFAZ DE USUARIO ---
 
-    # 5. ANÁLISIS ABC (Basado en Ingresos)
-    df_final = df_final.sort_values(by='revenue', ascending=False)
-    df_final['revenue_cumsum'] = df_final['revenue'].cumsum()
-    total_revenue = df_final['revenue'].sum()
-    df_final['revenue_share'] = df_final['revenue_cumsum'] / total_revenue
-    df_final['abc_class'] = np.where(df_final['revenue_share'] <= 0.8, 'A',
-                                   np.where(df_final['revenue_share'] <= 0.95, 'B', 'C'))
+try:
+    df_prod, df_stock, df_sales = load_data()
+    
+    # Procesar lógica
+    df_master, df_stock_full, df_sales_raw = process_data(df_prod, df_stock, df_sales)
 
-    # 6. ANÁLISIS XYZ (Basado en Volatilidad de Ventas)
-    cv_threshold_y = 0.5
-    cv_threshold_z = 1.0
-    mean_sales = df_final['qty_sold'].mean()
-    df_final['coeff_variation'] = df_final['sales_std_dev'] / mean_sales
-    df_final['xyz_class'] = np.where(df_final['coeff_variation'] <= cv_threshold_y, 'X',
-                                   np.where(df_final['coeff_variation'] <= cv_threshold_z, 'Y', 'Z'))
+    # Sidebar: Filtros Globales
+    st.sidebar.title("🎛️ Panel de Control")
+    st.sidebar.image("https://cdn-icons-png.flaticon.com/512/2892/2892591.png", width=100) # Placeholder logo
+    
+    categorias = ['Todas'] + list(df_master['categ_name'].unique())
+    filtro_categ = st.sidebar.selectbox("Filtrar por Categoría", categorias)
+    
+    if filtro_categ != 'Todas':
+        df_master = df_master[df_master['categ_name'] == filtro_categ]
+        df_stock_full = df_stock_full[df_stock_full['categ_name'] == filtro_categ]
 
-    df_final['abc_xyz_class'] = df_final['abc_class'] + df_final['xyz_class']
+    # --- HEADER ---
+    st.title("🚀 Dashboard de Inteligencia de Negocios Odoo")
+    st.markdown("Vista unificada de Inventario, Ventas y Sugerencias de IA")
+    st.markdown("---")
 
-    # 7. DIAGNÓSTICO ESTRATÉGICO MEJORADO
-    def diagnostico_estrategico(row):
-        clase = row['abc_xyz_class']
-        cobertura = row['cobertura_dias']
-        stock = row['quantity']
-        ventas = row['qty_sold']
+    # --- TABS ---
+    tab1, tab2, tab3, tab4 = st.tabs(["📊 KPIs Generales", "📦 Análisis de Inventario", "🚚 Sugerencias de Traslado", "🛒 Sugerencias de Compra"])
 
-        if stock <= 0 and ventas > 0: return "QUIEBRE DE STOCK"
-        if clase in ['AX', 'AY', 'BX'] and cobertura < 15: return "RIESGO ALTO: COMPRA URGENTE"
-        if clase in ['AZ', 'BY', 'CX'] and cobertura < 7: return "RIESGO MEDIO: REVISAR STOCK"
-        if clase in ['CZ', 'CY'] and cobertura > 180: return "EXCESO CRÍTICO: LIQUIDAR"
-        if cobertura > 365: return "INVENTARIO OBSOLETO"
-        return "GESTIÓN SALUDABLE"
-    df_final['diagnostico'] = df_final.apply(diagnostico_estrategico, axis=1)
+    # === TAB 1: KPIs GENERALES ===
+    with tab1:
+        col1, col2, col3, col4 = st.columns(4)
+        
+        total_ventas = df_sales_raw['revenue'].sum()
+        total_costo_inv = df_stock_full['valor_inventario_costo'].sum()
+        total_items = df_stock_full['stock_real_ubicacion'].sum()
+        margen_promedio = ((df_master['list_price'] - df_master['standard_price']) / df_master['list_price']).mean() * 100
 
-    # 8. SUGERENCIAS ACCIONABLES
-    compras = df_final[df_final['diagnostico'].str.contains("COMPRA|RIESGO")].copy()
-    compras['cantidad_sugerida'] = (compras['rotacion_diaria'] * 30 - compras['quantity']).clip(lower=1).astype(int)
+        col1.metric("Ventas Totales (Periodo)", f"${total_ventas:,.0f}")
+        col2.metric("Valor Inventario (Costo)", f"${total_costo_inv:,.0f}")
+        col3.metric("Unidades en Stock", f"{total_items:,.0f}")
+        col4.metric("Margen Teórico Promedio", f"{margen_promedio:.1f}%")
 
-    traslados_df = df_stock.groupby(['product_id'], as_index=False).agg(quantity=('quantity', 'sum'))
-    traslados_df['product_name'] = traslados_df['product_id'].map(lambda x: prod_map.get(x, {}).get('name'))
-    traslados_df = pd.merge(traslados_df, df_final[['product_id', 'cobertura_dias']], on='product_id')
+        st.subheader("Tendencia de Ventas")
+        # Agrupar ventas por día
+        ventas_diarias = df_sales_raw.groupby(df_sales_raw['date'].dt.date)['revenue'].sum().reset_index()
+        fig_ventas = px.line(ventas_diarias, x='date', y='revenue', title="Evolución de Ingresos Diarios", markers=True)
+        st.plotly_chart(fig_ventas, use_container_width=True)
 
-    sugerencias_traslado = []
-    # Si quieres sugerencias de traslado por ubicación, deberías usar stock.quant y agrupar por location_id
-    # Aquí solo se deja la estructura básica
-    df_stock['location_name'] = df_stock['location_id'].map(loc_map) if 'location_id' in df_stock.columns and 'location_id' in loc_map else None
-    for prod_id in df_stock['product_id'].unique():
-        prod_locations = df_stock[df_stock['product_id'] == prod_id]
-        if prod_locations.empty:
-            continue
-        exceso_locs = prod_locations[prod_locations['quantity'] > (prod_locations['quantity'].mean() * 1.5)]
-        quiebre_locs = prod_locations[prod_locations['quantity'] == 0]
-        if not exceso_locs.empty and not quiebre_locs.empty:
-            de = exceso_locs.iloc[0]
-            a = quiebre_locs.iloc[0]
-            sugerencias_traslado.append({
-                'Producto': de['product_name'],
-                'Desde (Tienda)': de.get('location_name', ''),
-                'Stock Origen': de['quantity'],
-                'Hacia (Tienda)': a.get('location_name', ''),
-                'Cantidad a Mover': int(max(1, de['quantity'] * 0.25))
-            })
-    df_traslados = pd.DataFrame(sugerencias_traslado)
-
-    return {
-        'kpi': df_final,
-        'traslados': df_traslados,
-        'compras': compras
-    }
-
-def main():
-    st.markdown(f"## 💎 **NEXUS PRO v3.0** | Centro de Comando Estratégico")
-    st.markdown(f"_{pd.to_datetime('today').strftime('%A, %d de %B de %Y')} | Datos en vivo desde Odoo_")
-
-    with st.sidebar:
-        st.title("Configuración de Análisis")
-        dias_analisis = st.slider("📅 Ventana Histórica (Días)", 30, 365, 90)
-        st.info("Este tablero utiliza análisis ABC-XYZ para inventario.")
-
-    try:
-        connector = OdooConnector()
-        with st.spinner("Conectando con Odoo y extrayendo datos..."):
-            # INVENTARIO y PRODUCTOS desde product.product (variante) para alinear con sale.order.line
-            df_product = connector.get_product_data()          # contiene id = variante
-            df_product.rename(columns={'id': 'product_id'}, inplace=True)
-
-            # STOCK desde stock.quant
-            df_stock = connector.get_stock_data()
-            # VENTAS desde sale.order.line
-            df_sales = connector.get_sales_data()
-
-            # UBICACIONES
-            df_location = connector.get_location_data()
-    except Exception as e:
-        st.error(f"Error fatal al conectar o cargar datos de Odoo: {e}")
-        st.stop()
-
-    # Si no hay ventas, evita cálculos que den NaN/inf y muestra aviso
-    if df_sales.empty:
-        st.warning("No hay líneas de venta en Odoo (sale.order.line está vacío). Se mostrarán solo KPIs de stock.")
-        ventas_gb = pd.DataFrame(columns=['product_id', 'qty_sold', 'revenue'])
-    else:
-        ventas_gb = df_sales.groupby('product_id', as_index=False).agg(
-            qty_sold=('qty_sold', 'sum'),
-            revenue=('revenue', 'sum')
-        )
-        ventas_gb['product_id'] = pd.to_numeric(ventas_gb['product_id'], errors='coerce')
-
-    # Si no hay stock, aborta
-    if df_stock.empty or df_product.empty:
-        st.error("No hay datos de stock o productos en Odoo.")
-        st.stop()
-
-    with st.spinner("Aplicando inteligencia de negocio..."):
-        bi = process_business_logic(df_stock, ventas_gb, df_product, df_location, dias_analisis)
-        df_final = bi['kpi']
-
-    # --- PESTAÑAS DEL DASHBOARD ---
-    tab_general, tab_abc_xyz, tab_acciones = st.tabs([
-        "📈 **Visión General**",
-        "🧩 **Matriz Estratégica ABC-XYZ**",
-        "🎯 **Plan de Acción**"
-    ])
-
-    with tab_general:
-        st.subheader("Indicadores Clave de Rendimiento (KPIs)")
-        k1, k2, k3, k4 = st.columns(4)
-        k1.metric("💰 Valor Total del Inventario", format_currency(df_final['capital_inmovilizado'].sum()))
-        k2.metric("🔄 Sell-Through Rate Promedio", format_percent(df_final['sell_through_rate'].mean()), help="Porcentaje de inventario vendido en el período.")
-        k3.metric("📈 GMROI Promedio", f"{df_final['gmroi'].mean():.2f}x", help="Ganancia Bruta por cada dólar invertido en inventario.")
-        k4.metric("📦 SKUs Analizados", format_number(len(df_final)))
-
-        st.markdown("---")
-        col1, col2 = st.columns([3, 2])
-        with col1:
-            st.markdown("#### Cobertura vs. Rotación por Diagnóstico")
-            df_final['bubble_size'] = df_final['quantity'].clip(lower=0)
-            fig_scatter = px.scatter(
-                df_final, x="cobertura_dias", y="rotacion_diaria", size="bubble_size", color="diagnostico",
-                hover_name="product_name", size_max=50, height=450,
-                labels={"cobertura_dias": "Cobertura (Días)", "rotacion_diaria": "Rotación (Unidades/Día)"}
-            )
-            st.plotly_chart(fig_scatter, use_container_width=True)
-        with col2:
-            st.markdown("#### Valor de Inventario por Diagnóstico")
-            fig_pie = px.pie(df_final, names='diagnostico', values='capital_inmovilizado', hole=0.5, height=450)
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.subheader("Top 10 Productos Más Vendidos ($)")
+            top_prods = df_master.nlargest(10, 'revenue')
+            fig_bar = px.bar(top_prods, x='revenue', y='name', orientation='h', color='revenue', title="Top Productos por Ingresos")
+            st.plotly_chart(fig_bar, use_container_width=True)
+            
+        with col_b:
+            st.subheader("Distribución de Inventario por Categoría")
+            pie_data = df_stock_full.groupby('categ_name')['valor_inventario_costo'].sum().reset_index()
+            fig_pie = px.pie(pie_data, values='valor_inventario_costo', names='categ_name', title="Valor de Inventario por Categoría")
             st.plotly_chart(fig_pie, use_container_width=True)
 
-    with tab_abc_xyz:
-        st.subheader("Matriz de Decisión Estratégica ABC-XYZ")
-        st.info("Clasifica tus productos para enfocar tus esfuerzos. **A**: Más importantes (80% ingresos). **X**: Demanda más estable.")
+    # === TAB 2: ANÁLISIS DE INVENTARIO ===
+    with tab2:
+        st.header("Salud del Inventario")
+        
+        # Filtros rápidos
+        col_f1, col_f2 = st.columns(2)
+        ver_agotados = col_f1.checkbox("Ver solo Agotados")
+        ver_sobrestock = col_f2.checkbox("Ver solo Sobre-stock (>90 días)")
+        
+        df_view = df_master.copy()
+        if ver_agotados:
+            df_view = df_view[df_view['stock_total_teorico'] <= 0]
+        if ver_sobrestock:
+            df_view = df_view[df_view['dias_inventario'] > 90]
 
-        matrix = df_final.pivot_table(index='abc_class', columns='xyz_class', values='product_id', aggfunc='count').fillna(0)
-        matrix = matrix.reindex(index=['A', 'B', 'C'], columns=['X', 'Y', 'Z'])
+        # Tabla Interactiva
+        st.dataframe(
+            df_view[['default_code', 'name', 'categ_name', 'stock_total_teorico', 'venta_diaria_promedio', 'dias_inventario', 'estado_inventario']],
+            column_config={
+                "dias_inventario": st.column_config.NumberColumn("Días Cobertura", format="%.1f días"),
+                "venta_diaria_promedio": st.column_config.NumberColumn("Rotación Diaria", format="%.2f u/día"),
+                "stock_total_teorico": st.column_config.NumberColumn("Stock Total"),
+            },
+            use_container_width=True,
+            hide_index=True
+        )
+        
+        st.info("💡 **Tips:** 'Días Cobertura' indica cuánto durará tu stock actual al ritmo de ventas actual. Si es infinito (999), es porque el producto no rota.")
 
-        fig_matrix = px.imshow(matrix, text_auto=True, aspect="auto", height=500,
-                               labels=dict(x="Clase XYZ (Volatilidad)", y="Clase ABC (Importancia)", color="Nº de Productos"),
-                               color_continuous_scale=px.colors.sequential.Blues)
-        fig_matrix.update_layout(title_text='Cantidad de Productos por Estrategia', title_x=0.5)
-        st.plotly_chart(fig_matrix, use_container_width=True)
-
-        st.markdown("#### Explorar Productos por Estrategia")
-        selected_class = st.selectbox("Selecciona una clase estratégica para ver los productos:", df_final['abc_xyz_class'].unique())
-        st.dataframe(df_final[df_final['abc_xyz_class'] == selected_class][[
-            'product_name', 'abc_xyz_class', 'diagnostico', 'quantity', 'cobertura_dias', 'revenue'
-        ]].rename(columns={'product_name':'Producto', 'quantity':'Stock', 'revenue':'Ingresos', 'cobertura_dias':'Cobertura (días)'}), use_container_width=True)
-
-    with tab_acciones:
-        st.subheader("🎯 Plan de Acción Priorizado")
-        st.markdown("Decisiones automáticas basadas en el análisis para optimizar tu inventario.")
-
-        st.markdown("#### 🛒 **Sugerencias de Compra Urgente**")
-        st.warning("Estos productos son críticos o están en riesgo de quiebre. Prioriza su reposición.")
-        df_compras = bi['compras']
-        st.dataframe(df_compras[['product_name', 'abc_xyz_class', 'quantity', 'rotacion_diaria', 'cantidad_sugerida']].rename(columns={
-            'product_name':'Producto', 'abc_xyz_class':'Clase', 'quantity':'Stock Actual', 'rotacion_diaria':'Venta Diaria', 'cantidad_sugerida':'Compra Sugerida'
-        }), use_container_width=True)
-
-        st.markdown("#### 🚚 **Sugerencias de Traslado entre Tiendas**")
-        st.info("Mueve inventario desde ubicaciones con exceso hacia aquellas con quiebre para balancear el stock y evitar ventas perdidas.")
-        df_traslados = bi['traslados']
-        if not df_traslados.empty:
-            st.dataframe(df_traslados, use_container_width=True)
+    # === TAB 3: SUGERENCIAS DE TRASLADO (INTELIGENCIA) ===
+    with tab3:
+        st.header("🚚 Optimización Multi-Bodega")
+        st.markdown("El sistema busca productos que estén **agotados en una ubicación** pero tengan **exceso en otra**.")
+        
+        # Algoritmo de Sugerencia de Traslado
+        # 1. Pivotear stock por ubicación
+        stock_pivot = df_stock_full.pivot_table(index=['product_id', 'name', 'default_code'], columns='location_name', values='stock_real_ubicacion', fill_value=0).reset_index()
+        
+        # Obtenemos lista de bodegas
+        bodegas = [c for c in stock_pivot.columns if c not in ['product_id', 'name', 'default_code']]
+        
+        if len(bodegas) < 2:
+            st.warning("⚠️ Necesitas al menos 2 ubicaciones/bodegas internas con stock para sugerir traslados.")
         else:
-            st.success("¡Balance perfecto! No se sugieren traslados por el momento.")
+            sugerencias = []
+            
+            # Recorremos productos
+            for index, row in stock_pivot.iterrows():
+                for bodega_origen in bodegas:
+                    for bodega_destino in bodegas:
+                        if bodega_origen == bodega_destino: continue
+                        
+                        qty_origen = row[bodega_origen]
+                        qty_destino = row[bodega_destino]
+                        
+                        # LOGICA: Si origen tiene mucho (>10) y destino tiene 0 o muy poco (<2)
+                        if qty_origen > 10 and qty_destino < 2:
+                            sugerencias.append({
+                                'Producto': row['name'],
+                                'Ref': row['default_code'],
+                                'Desde (Origen)': bodega_origen,
+                                'Hacia (Destino)': bodega_destino,
+                                'Cantidad a Mover': int(qty_origen * 0.2), # Sugerir mover el 20%
+                                'Stock Origen': qty_origen,
+                                'Stock Destino': qty_destino
+                            })
+            
+            if sugerencias:
+                df_sugerencias = pd.DataFrame(sugerencias)
+                st.success(f"✅ Se encontraron {len(df_sugerencias)} oportunidades de balanceo de inventario.")
+                st.dataframe(df_sugerencias, use_container_width=True)
+            else:
+                st.info("El inventario parece estar bien balanceado entre bodegas.")
 
-if __name__ == "__main__":
-    main()
+    # === TAB 4: SUGERENCIAS DE COMPRA ===
+    with tab4:
+        st.header("🛒 Reabastecimiento Inteligente")
+        
+        # Lógica: Productos con stock < punto de reorden (asumamos 5 por defecto o basado en venta)
+        # Sugerencia = (Venta Diaria * 30 días) - Stock Actual
+        
+        compras_df = df_master.copy()
+        
+        # Calculamos Stock Ideal para 30 días
+        compras_df['stock_ideal'] = compras_df['venta_diaria_promedio'] * 30
+        compras_df['cantidad_sugerida'] = compras_df['stock_ideal'] - compras_df['stock_total_teorico']
+        
+        # Filtramos solo los que necesitan compra positiva y tienen rotación
+        filtro_compras = (compras_df['cantidad_sugerida'] > 0) & (compras_df['venta_diaria_promedio'] > 0)
+        df_a_comprar = compras_df[filtro_compras].sort_values(by='cantidad_sugerida', ascending=False)
+        
+        # Costo estimado de la compra
+        df_a_comprar['inversion_estimada'] = df_a_comprar['cantidad_sugerida'] * df_a_comprar['standard_price']
+        
+        total_inversion = df_a_comprar['inversion_estimada'].sum()
+        
+        st.metric("Inversión Requerida para 30 días de Stock", f"${total_inversion:,.0f}")
+        
+        st.dataframe(
+            df_a_comprar[['default_code', 'name', 'x_studio_ref_madre', 'stock_total_teorico', 'venta_diaria_promedio', 'cantidad_sugerida', 'standard_price', 'inversion_estimada']],
+             column_config={
+                "venta_diaria_promedio": st.column_config.NumberColumn("Venta/Día", format="%.2f"),
+                "cantidad_sugerida": st.column_config.NumberColumn("A Pedir", format="%.0f u"),
+                "inversion_estimada": st.column_config.NumberColumn("Costo Estimado", format="$ %.2f"),
+            },
+            hide_index=True,
+            use_container_width=True
+        )
+
+except Exception as e:
+    st.error(f"Ocurrió un error en la ejecución del dashboard: {e}")
+    st.write("Detalle técnico:", e)
