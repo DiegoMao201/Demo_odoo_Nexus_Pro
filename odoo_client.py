@@ -64,8 +64,9 @@ class OdooConnector:
         """
         CRUCIAL PARA BI: Trae el stock exacto por ubicación/bodega.
         Modelo: stock.quant
+        CORRECCION: Eliminado 'inventory_value' para evitar error en Odoo Community
         """
-        fields = ['product_id', 'location_id', 'quantity', 'inventory_value', 'in_date']
+        fields = ['product_id', 'location_id', 'quantity', 'in_date']
         # Filtramos ubicaciones internas (usage = internal) para no ver stock de clientes/proveedores
         domain = [['location_id.usage', '=', 'internal']]
         data = self.models.execute_kw(self.db, self.uid, self.password, 'stock.quant', 'search_read', [domain], {'fields': fields, 'limit': 10000})

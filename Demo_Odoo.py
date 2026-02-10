@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from odoo_client import OdooConnector
+from odoo_client import OdooConnector # Asegúrate que el archivo se llame odoo_cliente.py
 import time
 
 # Configuración de página
@@ -34,25 +34,36 @@ def load_data():
 
 # --- LÓGICA DE NEGOCIO (EL CEREBRO) ---
 def process_data(df_prod, df_stock, df_sales):
+    if df_prod.empty:
+        st.error("No se encontraron productos. Revisa tu base de datos.")
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
     # 1. Enriquecer Stock con datos del producto (Costo, Precio, Categoría)
     # Hacemos merge left para mantener el stock aunque falten datos maestros
-    df_stock_full = pd.merge(df_stock, df_prod, on='product_id', how='left')
-    
-    # Calcular valoración real del inventario
-    df_stock_full['valor_inventario_costo'] = df_stock_full['stock_real_ubicacion'] * df_stock_full['standard_price']
-    df_stock_full['valor_inventario_venta'] = df_stock_full['stock_real_ubicacion'] * df_stock_full['list_price']
+    if not df_stock.empty:
+        df_stock_full = pd.merge(df_stock, df_prod, on='product_id', how='left')
+        
+        # Calcular valoración real del inventario (CALCULADO MANUALMENTE PARA EVITAR ERROR ODOO)
+        df_stock_full['valor_inventario_costo'] = df_stock_full['stock_real_ubicacion'] * df_stock_full['standard_price']
+        df_stock_full['valor_inventario_venta'] = df_stock_full['stock_real_ubicacion'] * df_stock_full['list_price']
+    else:
+        # Si no hay stock, creamos un df vacío con las columnas necesarias
+        df_stock_full = pd.DataFrame(columns=['product_id', 'stock_real_ubicacion', 'valor_inventario_costo', 'categ_name', 'location_name'])
 
     # 2. Análisis de Ventas por Producto
-    sales_summary = df_sales.groupby('product_id').agg({
-        'qty_sold': 'sum',
-        'revenue': 'sum',
-        'date': 'max' # Última fecha de venta
-    }).reset_index()
-    
-    # Calcular venta diaria promedio (asumiendo historial completo cargado, ajustar según filtro fecha)
-    dias_analisis = (df_sales['date'].max() - df_sales['date'].min()).days
-    if dias_analisis == 0: dias_analisis = 1
-    sales_summary['venta_diaria_promedio'] = sales_summary['qty_sold'] / dias_analisis
+    if not df_sales.empty:
+        sales_summary = df_sales.groupby('product_id').agg({
+            'qty_sold': 'sum',
+            'revenue': 'sum',
+            'date': 'max' # Última fecha de venta
+        }).reset_index()
+        
+        # Calcular venta diaria promedio
+        dias_analisis = (df_sales['date'].max() - df_sales['date'].min()).days
+        if dias_analisis == 0: dias_analisis = 1
+        sales_summary['venta_diaria_promedio'] = sales_summary['qty_sold'] / dias_analisis
+    else:
+        sales_summary = pd.DataFrame(columns=['product_id', 'qty_sold', 'revenue', 'venta_diaria_promedio'])
 
     # 3. MASTER DATA: Unimos todo en un gran DataFrame Maestro
     df_master = pd.merge(df_prod, sales_summary, on='product_id', how='left')
@@ -84,6 +95,10 @@ try:
     
     # Procesar lógica
     df_master, df_stock_full, df_sales_raw = process_data(df_prod, df_stock, df_sales)
+    
+    if df_master.empty:
+        st.warning("No hay datos para mostrar.")
+        st.stop()
 
     # Sidebar: Filtros Globales
     st.sidebar.title("🎛️ Panel de Control")
@@ -94,7 +109,8 @@ try:
     
     if filtro_categ != 'Todas':
         df_master = df_master[df_master['categ_name'] == filtro_categ]
-        df_stock_full = df_stock_full[df_stock_full['categ_name'] == filtro_categ]
+        if not df_stock_full.empty:
+            df_stock_full = df_stock_full[df_stock_full['categ_name'] == filtro_categ]
 
     # --- HEADER ---
     st.title("🚀 Dashboard de Inteligencia de Negocios Odoo")
@@ -108,9 +124,9 @@ try:
     with tab1:
         col1, col2, col3, col4 = st.columns(4)
         
-        total_ventas = df_sales_raw['revenue'].sum()
-        total_costo_inv = df_stock_full['valor_inventario_costo'].sum()
-        total_items = df_stock_full['stock_real_ubicacion'].sum()
+        total_ventas = df_sales_raw['revenue'].sum() if not df_sales_raw.empty else 0
+        total_costo_inv = df_stock_full['valor_inventario_costo'].sum() if not df_stock_full.empty else 0
+        total_items = df_stock_full['stock_real_ubicacion'].sum() if not df_stock_full.empty else 0
         margen_promedio = ((df_master['list_price'] - df_master['standard_price']) / df_master['list_price']).mean() * 100
 
         col1.metric("Ventas Totales (Periodo)", f"${total_ventas:,.0f}")
@@ -119,10 +135,13 @@ try:
         col4.metric("Margen Teórico Promedio", f"{margen_promedio:.1f}%")
 
         st.subheader("Tendencia de Ventas")
-        # Agrupar ventas por día
-        ventas_diarias = df_sales_raw.groupby(df_sales_raw['date'].dt.date)['revenue'].sum().reset_index()
-        fig_ventas = px.line(ventas_diarias, x='date', y='revenue', title="Evolución de Ingresos Diarios", markers=True)
-        st.plotly_chart(fig_ventas, use_container_width=True)
+        if not df_sales_raw.empty:
+            # Agrupar ventas por día
+            ventas_diarias = df_sales_raw.groupby(df_sales_raw['date'].dt.date)['revenue'].sum().reset_index()
+            fig_ventas = px.line(ventas_diarias, x='date', y='revenue', title="Evolución de Ingresos Diarios", markers=True)
+            st.plotly_chart(fig_ventas, use_container_width=True)
+        else:
+            st.info("No hay datos de ventas para mostrar gráficos.")
 
         col_a, col_b = st.columns(2)
         with col_a:
@@ -133,9 +152,12 @@ try:
             
         with col_b:
             st.subheader("Distribución de Inventario por Categoría")
-            pie_data = df_stock_full.groupby('categ_name')['valor_inventario_costo'].sum().reset_index()
-            fig_pie = px.pie(pie_data, values='valor_inventario_costo', names='categ_name', title="Valor de Inventario por Categoría")
-            st.plotly_chart(fig_pie, use_container_width=True)
+            if not df_stock_full.empty:
+                pie_data = df_stock_full.groupby('categ_name')['valor_inventario_costo'].sum().reset_index()
+                fig_pie = px.pie(pie_data, values='valor_inventario_costo', names='categ_name', title="Valor de Inventario por Categoría")
+                st.plotly_chart(fig_pie, use_container_width=True)
+            else:
+                st.info("No hay stock para mostrar gráfico.")
 
     # === TAB 2: ANÁLISIS DE INVENTARIO ===
     with tab2:
@@ -171,45 +193,48 @@ try:
         st.header("🚚 Optimización Multi-Bodega")
         st.markdown("El sistema busca productos que estén **agotados en una ubicación** pero tengan **exceso en otra**.")
         
-        # Algoritmo de Sugerencia de Traslado
-        # 1. Pivotear stock por ubicación
-        stock_pivot = df_stock_full.pivot_table(index=['product_id', 'name', 'default_code'], columns='location_name', values='stock_real_ubicacion', fill_value=0).reset_index()
-        
-        # Obtenemos lista de bodegas
-        bodegas = [c for c in stock_pivot.columns if c not in ['product_id', 'name', 'default_code']]
-        
-        if len(bodegas) < 2:
-            st.warning("⚠️ Necesitas al menos 2 ubicaciones/bodegas internas con stock para sugerir traslados.")
+        if df_stock_full.empty:
+             st.warning("No hay datos de stock detallado (stock.quant) para analizar bodegas.")
         else:
-            sugerencias = []
+            # Algoritmo de Sugerencia de Traslado
+            # 1. Pivotear stock por ubicación
+            stock_pivot = df_stock_full.pivot_table(index=['product_id', 'name', 'default_code'], columns='location_name', values='stock_real_ubicacion', fill_value=0).reset_index()
             
-            # Recorremos productos
-            for index, row in stock_pivot.iterrows():
-                for bodega_origen in bodegas:
-                    for bodega_destino in bodegas:
-                        if bodega_origen == bodega_destino: continue
-                        
-                        qty_origen = row[bodega_origen]
-                        qty_destino = row[bodega_destino]
-                        
-                        # LOGICA: Si origen tiene mucho (>10) y destino tiene 0 o muy poco (<2)
-                        if qty_origen > 10 and qty_destino < 2:
-                            sugerencias.append({
-                                'Producto': row['name'],
-                                'Ref': row['default_code'],
-                                'Desde (Origen)': bodega_origen,
-                                'Hacia (Destino)': bodega_destino,
-                                'Cantidad a Mover': int(qty_origen * 0.2), # Sugerir mover el 20%
-                                'Stock Origen': qty_origen,
-                                'Stock Destino': qty_destino
-                            })
+            # Obtenemos lista de bodegas
+            bodegas = [c for c in stock_pivot.columns if c not in ['product_id', 'name', 'default_code']]
             
-            if sugerencias:
-                df_sugerencias = pd.DataFrame(sugerencias)
-                st.success(f"✅ Se encontraron {len(df_sugerencias)} oportunidades de balanceo de inventario.")
-                st.dataframe(df_sugerencias, use_container_width=True)
+            if len(bodegas) < 2:
+                st.warning("⚠️ Necesitas al menos 2 ubicaciones/bodegas internas con stock para sugerir traslados.")
             else:
-                st.info("El inventario parece estar bien balanceado entre bodegas.")
+                sugerencias = []
+                
+                # Recorremos productos
+                for index, row in stock_pivot.iterrows():
+                    for bodega_origen in bodegas:
+                        for bodega_destino in bodegas:
+                            if bodega_origen == bodega_destino: continue
+                            
+                            qty_origen = row[bodega_origen]
+                            qty_destino = row[bodega_destino]
+                            
+                            # LOGICA: Si origen tiene mucho (>10) y destino tiene 0 o muy poco (<2)
+                            if qty_origen > 10 and qty_destino < 2:
+                                sugerencias.append({
+                                    'Producto': row['name'],
+                                    'Ref': row['default_code'],
+                                    'Desde (Origen)': bodega_origen,
+                                    'Hacia (Destino)': bodega_destino,
+                                    'Cantidad a Mover': int(qty_origen * 0.2), # Sugerir mover el 20%
+                                    'Stock Origen': qty_origen,
+                                    'Stock Destino': qty_destino
+                                })
+                
+                if sugerencias:
+                    df_sugerencias = pd.DataFrame(sugerencias)
+                    st.success(f"✅ Se encontraron {len(df_sugerencias)} oportunidades de balanceo de inventario.")
+                    st.dataframe(df_sugerencias, use_container_width=True)
+                else:
+                    st.info("El inventario parece estar bien balanceado entre bodegas.")
 
     # === TAB 4: SUGERENCIAS DE COMPRA ===
     with tab4:
