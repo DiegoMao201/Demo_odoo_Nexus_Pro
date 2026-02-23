@@ -23,7 +23,6 @@ st.markdown("""
 # --- FUNCIÓN PARA EXPORTAR EXCEL PROFESIONAL ---
 def generar_excel_profesional(df, sheet_name="Reporte"):
     output = io.BytesIO()
-    # Usamos xlsxwriter como motor para formateo avanzado
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, index=False, sheet_name=sheet_name)
         workbook = writer.book
@@ -50,6 +49,7 @@ def generar_excel_profesional(df, sheet_name="Reporte"):
     return output.getvalue()
 
 # --- EXTRACCIÓN DE DATOS (CACHÉ) ---
+# Se mantiene tu estructura original intacta
 @st.cache_data(ttl=300)
 def load_data():
     connector = OdooConnector()
@@ -90,9 +90,16 @@ def process_data(df_prod, df_stock, df_sales):
 
     # 3. Master Data
     df_master = pd.merge(df_prod, sales_summary, on='product_id', how='left')
+    
+    # Rellenar nulos numéricos
     for col in ['qty_sold', 'revenue', 'venta_diaria_promedio']:
         df_master[col] = df_master[col].fillna(0)
-    df_master['clasificacion_abc'] = df_master['clasificacion_abc'].fillna('Sin Ventas')
+        
+    # CORRECCIÓN DEL ERROR: Convertir la columna categórica a texto (object) antes de aplicar fillna
+    if 'clasificacion_abc' in df_master.columns:
+        df_master['clasificacion_abc'] = df_master['clasificacion_abc'].astype(object).fillna('Sin Ventas')
+    else:
+        df_master['clasificacion_abc'] = 'Sin Ventas'
 
     # 4. KPIs Avanzados de Inventario
     df_master['dias_inventario'] = df_master.apply(
@@ -143,7 +150,8 @@ try:
 
     if filtro_categ != 'Todas':
         df_master = df_master[df_master['categ_name'] == filtro_categ]
-        if not df_stock_full.empty: df_stock_full = df_stock_full[df_stock_full['categ_name'] == filtro_categ]
+        if not df_stock_full.empty: 
+            df_stock_full = df_stock_full[df_stock_full['categ_name'] == filtro_categ]
     
     if filtro_abc != 'Todas':
         df_master = df_master[df_master['clasificacion_abc'] == filtro_abc]
@@ -180,7 +188,7 @@ try:
             st.markdown("#### Top 10 Productos Estrella (Ingresos)")
             top10 = df_master.nlargest(10, 'revenue')
             fig1 = px.bar(top10, x='revenue', y='name', orientation='h', color='clasificacion_abc', 
-                          color_discrete_map={'A (Alto Impacto)': '#2ca02c', 'B (Medio)': '#ff7f0e', 'C (Baja Rotación)': '#d62728'},
+                          color_discrete_map={'A (Alto Impacto)': '#2ca02c', 'B (Medio)': '#ff7f0e', 'C (Baja Rotación)': '#d62728', 'Sin Ventas': '#7f7f7f'},
                           labels={'revenue': 'Ingresos ($)', 'name': 'Producto'})
             fig1.update_layout(yaxis={'categoryorder':'total ascending'})
             st.plotly_chart(fig1, use_container_width=True)
